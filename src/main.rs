@@ -1,28 +1,31 @@
 use std::path::PathBuf;
 
 use anyhow::Result;
-use clap::{Parser, Subcommand};
-use enumerate::{popup, tui};
+use clap::Parser;
+use enumerate::{tmux, tui};
 
 #[derive(Parser)]
 #[command(name = "enumerate", about = "TUI for enumerate decision docs")]
 struct Cli {
-    #[command(subcommand)]
-    command: Command,
-}
+    /// Path to the decision document
+    file: PathBuf,
 
-#[derive(Subcommand)]
-enum Command {
-    /// Open the TUI on a file in the current terminal
-    Open { file: PathBuf },
-    /// Open the TUI in a tmux popup if $TMUX is set, otherwise print the path
-    Popup { file: PathBuf },
+    /// Spawn the TUI in a new tmux window (requires $TMUX)
+    #[arg(long, conflicts_with = "popup")]
+    window: bool,
+
+    /// Spawn the TUI as a pseudo-modal over the current pane (requires $TMUX)
+    #[arg(long, conflicts_with = "window")]
+    popup: bool,
 }
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
-    match cli.command {
-        Command::Open { file } => tui::run(&file),
-        Command::Popup { file } => popup::run(&file),
+    if cli.window {
+        tmux::window(&cli.file)
+    } else if cli.popup {
+        tmux::popup(&cli.file)
+    } else {
+        tui::run(&cli.file)
     }
 }

@@ -1,4 +1,4 @@
 pub mod doc;
 pub mod gitignore;
-pub mod popup;
+pub mod tmux;
 pub mod tui;

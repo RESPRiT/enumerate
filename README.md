@@ -4,8 +4,8 @@ A Rust TUI + Claude Code skill for **atomizing decision-making**. When you're st
 
 The repo ships two pieces that work together:
 
-1. **`enumerate` binary** — a Rust TUI (ratatui + crossterm) that opens an enumeration doc as a tmux popup over Claude Code. You annotate each case in a `Decision` column; the file on disk stays the source of truth.
-2. **`SKILL.md`** — the `/enumerate` Claude Code skill that orchestrates the round-trip: it picks a template, enumerates the design space, opens the popup, and walks you through your marked items one by one.
+1. **`enumerate` binary** — a Rust TUI (ratatui + crossterm) that opens an enumeration doc in a tmux window alongside Claude Code. You annotate each case in a `Decision` column; the file on disk stays the source of truth.
+2. **`SKILL.md`** — the `/enumerate` Claude Code skill that orchestrates the round-trip: it picks a template, enumerates the design space, opens the TUI, and walks you through your marked items one by one.
 
 ## How it works
 
@@ -17,12 +17,13 @@ The repo ships two pieces that work together:
   writes ./.enumerate/<YYYY-MM-DD>-<topic-slug>.md
         │
         ▼
-  Claude runs `enumerate popup <path>`
+  Claude runs `enumerate <path> --window`
         │
         ▼
-  TUI opens in a tmux popup over Claude Code
+  TUI opens in a new tmux window alongside Claude Code
   → you mark each case with !! / ! / ? / OK
   → autosaves on every keystroke
+  → close the window when done
         │
         ▼
   Claude re-reads the file and walks you through
@@ -45,7 +46,7 @@ See [`SKILL.md`](SKILL.md) for the full skill spec and [`docs/V1_SPEC.md`](docs/
 ### Prerequisites
 
 - Rust 2024 edition (stable toolchain via `rustup`)
-- tmux (optional, but required for the popup-over-Claude-Code flow)
+- tmux (optional, but required for the in-session window flow with Claude Code)
 - Claude Code (to use the `/enumerate` skill)
 
 ### Install the binary
@@ -83,18 +84,18 @@ Restart Claude Code (or start a new session) and `/enumerate` should be availabl
 /enumerate the auth middleware rewrite
 ```
 
-Claude will explore the topic, write `./.enumerate/2026-04-08-auth-middleware-rewrite.md` (date-prefixed for chronological sorting), open it in a tmux popup, and then walk you through your marked items once you close the popup.
+Claude will explore the topic, write `./.enumerate/2026-04-08-auth-middleware-rewrite.md` (date-prefixed for chronological sorting), open it in a new tmux window, and then walk you through your marked items once you close the window.
 
 ### Standalone
 
 You can also point the binary at any conformant doc:
 
 ```sh
-enumerate open ./docs/sample.md     # full-screen TUI in the current terminal
-enumerate popup ./docs/sample.md    # tmux popup if $TMUX is set, else prints the path
+enumerate ./docs/sample.md            # full-screen TUI in the current terminal
+enumerate ./docs/sample.md --window   # spawn the TUI in a new tmux window (requires $TMUX)
 ```
 
-`enumerate popup` is what the skill calls. Inside tmux it blocks until the popup closes; outside tmux it prints `Run enumerate open <path> to edit` to stderr and exits 0.
+`--window` is what the skill calls from inside tmux. It blocks until the user closes the window. Outside tmux the flag errors out — the skill detects `$TMUX` itself and falls back to instructing the user to run plain `enumerate <path>` manually.
 
 ## Doc format
 
@@ -127,7 +128,7 @@ The `Decision` column is appended automatically by the binary on load — templa
 ```sh
 cargo build              # debug build
 cargo test               # run round-trip parser tests
-cargo run -- open ./docs/sample.md
+cargo run -- ./docs/sample.md
 ```
 
 Project layout:
@@ -137,7 +138,7 @@ src/
 ├── main.rs       # clap dispatch
 ├── doc/          # parser + serializer + types
 ├── tui/          # ratatui App, view, state
-└── popup.rs      # tmux detection + display-popup
+└── tmux.rs       # tmux detection + new-window launcher
 tests/
 ├── parse_roundtrip.rs
 └── fixtures/

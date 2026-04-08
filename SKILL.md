@@ -16,7 +16,7 @@ If a doc already exists at the path provided, skip to step 3.
 2. Lay them out in a structured doc the user can navigate and annotate.
 3. Walk the user through the items one at a time, in priority order, so each decision is made deliberately and independently.
 
-The TUI binary (`enumerate`) is the user-facing surface. It opens the doc as a popup over Claude Code and lets the user mark each case in the **Decision** column. The skill orchestrates the round-trip between agent and user.
+The TUI binary (`enumerate`) is the user-facing surface. It opens the doc in a tmux window alongside Claude Code and lets the user mark each case in the **Decision** column. The skill orchestrates the round-trip between agent and user.
 
 ## Markers
 
@@ -131,14 +131,14 @@ Format rules:
 - Field markers are `**FieldName:**` followed by inline value or block content.
 - **Do not include the Decision column.** The binary appends it on load.
 
-### 3. Open the popup
+### 3. Open the TUI
 
-Run `enumerate popup <path>` via Bash. The binary handles tmux detection internally:
+Check whether you're inside tmux by inspecting `$TMUX` (e.g., `echo "${TMUX:-no}"` via Bash):
 
-- **Inside tmux:** the call blocks until the user closes the popup. When it returns, re-read the file in the same turn and proceed to step 4.
-- **Outside tmux:** the call prints the path to stderr and returns immediately. End your turn and tell the user to run `enumerate open <path>` themselves, then reply when they're done. Re-read the file in the next turn and proceed to step 4.
+- **Inside tmux ($TMUX is set):** run `enumerate <path> --window` via Bash. The binary spawns a new tmux window running the TUI and blocks until that window closes. When it returns, re-read the file in the same turn and proceed to step 4.
+- **Outside tmux ($TMUX is unset):** do **not** invoke the binary yourself — `--window` errors out non-zero outside tmux, and running it without the flag would take over the agent's terminal. Instead, end your turn and tell the user to run `enumerate <path>` themselves, then reply when they're done. Re-read the file in the next turn and proceed to step 4.
 
-This step is **always** run after writing the doc. There is no condition under which the popup is skipped or replaced with another invocation.
+This step is **always** run after writing the doc. There is no condition under which the TUI step is skipped or replaced with another invocation.
 
 ### 4. Walk the list
 
@@ -186,4 +186,4 @@ Update the doc with:
 - **Prep and decide can be separate sessions.** The enumeration session does the expensive work (finding edge cases). The decision session skips straight to choosing.
 - **Explain `?` items before asking.** The user marked them because they don't understand — lead with clarification, not a question.
 - **Track derivations.** When one decision constrains another, note it. "This follows from our decision on #4b."
-- **Browse vs. walk is a contract.** The TUI is browse-mode; you walk in chat. Don't try to walk inside the popup, and don't try to do free-form browsing in chat.
+- **Browse vs. walk is a contract.** The TUI is browse-mode; you walk in chat. Don't try to walk inside the TUI, and don't try to do free-form browsing in chat.

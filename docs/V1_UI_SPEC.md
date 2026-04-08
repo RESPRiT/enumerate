@@ -1,6 +1,6 @@
 # enumerate-tui v1 UI spec
 
-UI/interaction spec for the TUI invoked by `enumerate open <file>`.
+UI/interaction spec for the TUI invoked by `enumerate <file>` (or `enumerate <file> --window` from inside tmux).
 Companion to `V1_SPEC.md`, which covers the data model, parser, CLI,
 and agent integration.
 
