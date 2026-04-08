@@ -1,0 +1,13 @@
+[package]
+name = "enumerate"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = "1.0.102"
+clap = { version = "4.6.0", features = ["derive"] }
+indexmap = { version = "2.13.1", features = ["serde"] }
+pulldown-cmark = "0.13.3"
+ratatui = "0.30.0"
+serde = { version = "1.0.228", features = ["derive"] }
+serde_yaml = "0.9.34"
