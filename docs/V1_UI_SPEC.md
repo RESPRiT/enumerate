@@ -18,7 +18,7 @@ Single bordered view, rendered top-to-bottom:
 │   multiple lines.                                           │
 │                                                             │
 │        ┌──────┬─────────┬──────────┬────────┬───────┐       │
-│        │ #    │ Setup   │ Expected │ Status │ Notes │       │  ← per-table header row
+│        │ #    │ Setup   │ Expected │ Decision │ Notes │       │  ← per-table header row
 │        ├──────┼─────────┼──────────┼────────┼───────┤       │
 │        │ #1   │ wrapped │ wrapped  │ ▌ OK   │ wrap… │       │
 │        │ Name │ text…   │ text…    │        │       │       │
@@ -28,7 +28,7 @@ Single bordered view, rendered top-to-bottom:
 │   …                                                         │
 │                                                             │
 │        ┌──────┬─────────┬──────────┬────────┬───────┐       │
-│        │ #    │ Setup   │ Expected │ Status │ Notes │       │
+│        │ #    │ Setup   │ Expected │ Decision │ Notes │       │
 │        ├──────┼─────────┼──────────┼────────┼───────┤       │
 │        │ #5 … │ …       │ …        │ ?      │ …     │       │
 │        └──────┴─────────┴──────────┴────────┴───────┘       │
@@ -49,7 +49,7 @@ ASCII is illustrative only — actual rendering uses ratatui block borders.
 - **Left:** topic title (from `frontmatter.topic` or H1)
 - **Right:** `⚠ N   [████░░░░] X / N`
   - `⚠ N` = parser warning count (omitted if zero)
-  - Progress: `X` = cases with non-empty Status, `N` = total cases
+  - Progress: `X` = cases with non-empty Decision, `N` = total cases
   - Bar fills proportionally
 
 ### Body (scrollable)
@@ -68,9 +68,9 @@ After all sections, a centered **Submit** button.
 - Leftmost column is `#` (showing `#N\nName`), then the columns in order.
 - All cells text-wrap; row heights grow to fit the tallest cell.
 - Per-table header row stays visible while any of that table's rows are on screen.
-- Only the **Status** column cells are interactive; all other columns are read-only display.
+- Only the **Decision** column cells are interactive; all other columns are read-only display.
 
-### Cell states (Status column only)
+### Cell states (Decision column only)
 
 | State | Border | Content | Cursor |
 |---|---|---|---|
@@ -79,7 +79,7 @@ After all sections, a centered **Submit** button.
 | Selected, empty | Highlighted | Greyscale | Blinking square |
 | Selected, filled | Highlighted | Colored | Blinking square (after last char) |
 
-Non-Status columns render with no per-cell border (or a default subdued border) and never receive selection.
+Non-Decision columns render with no per-cell border (or a default subdued border) and never receive selection.
 
 ### Submit button
 
@@ -97,12 +97,12 @@ Single line:
 
 ## Navigation
 
-Selection moves between Status cells in document order, top to bottom. Submit comes after the last Status cell.
+Selection moves between Decision cells in document order, top to bottom. Submit comes after the last Decision cell.
 
 | Key | Action |
 |---|---|
-| Up | Move selection to previous Status cell. No-op on the first cell. From Submit, moves back to the last Status cell. |
-| Down | Move selection to next Status cell. From the last cell, moves to Submit. From Submit, no-op. |
+| Up | Move selection to previous Decision cell. No-op on the first cell. From Submit, moves back to the last Decision cell. |
+| Down | Move selection to next Decision cell. From the last cell, moves to Submit. From Submit, no-op. |
 | Enter | Alias for Down — *unless* selection is on Submit, in which case Enter closes the TUI. |
 | Tab | Alias for Down. Pressing Tab on Submit no-ops. |
 | Shift+Tab | Alias for Up. |
@@ -112,12 +112,12 @@ When the selected cell is outside the visible scroll region, the body scrolls so
 
 ## Text entry
 
-While a Status cell is selected:
+While a Decision cell is selected:
 
 - **Printable characters** (letters, digits, punctuation, space) — append to the cell content at the end.
 - **Backspace** — delete the last character. No-op on empty cell.
 - **No left/right cursor movement** within a cell. Cursor is always at end-of-text.
-- **No line breaks.** Status is single-line input, visually wrapped if it gets long.
+- **No line breaks.** Decision is single-line input, visually wrapped if it gets long.
 
 ## Autosave
 
@@ -128,7 +128,7 @@ If no changes are made during the session, the file is never written, and any no
 ## Edge cases
 
 - **No cases.** Render header + empty body + Submit button. Submit is selected by default.
-- **Status column missing in `columns:`.** Parser warns and appends `Status` to `columns:` (and adds an empty Status field to each case). The TUI is then navigable normally.
+- **Decision column missing in `columns:`.** Normal for template-written files. Parser silently appends `Decision` to `columns:` (and adds an empty Decision field to each case). The TUI navigates it like any other Decision file.
 - **Empty group name.** Render with no group header (treated as the implicit "(ungrouped)" group).
 - **Window too narrow.** Tables wrap normally per ratatui's table widget; no special responsive layout.
 - **Single very tall cell.** Row grows to fit; the rest of the table follows.

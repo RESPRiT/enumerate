@@ -1,7 +1,7 @@
 ---
 topic: example
 created: 2026-04-07
-columns: [Setup, Expected, Notes, Status]
+columns: [Setup, Expected, Notes, Decision]
 ---
 
 # example
@@ -20,7 +20,7 @@ Group A description.
 
 **Notes:** some notes
 
-**Status:** OK
+**Decision:** OK
 
 ### #2 Second case
 
@@ -33,4 +33,4 @@ setup
 
 **Notes:** more notes
 
-**Status:** ?
+**Decision:** ?

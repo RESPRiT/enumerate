@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use anyhow::Result;
 
-use crate::doc::{Doc, STATUS_COLUMN, Warning};
+use crate::doc::{Doc, DECISION_COLUMN, Warning};
 
 const UNDO_STACK_MAX: usize = 500;
 
@@ -88,7 +88,7 @@ impl App {
     fn reset_input_cursor(&mut self) {
         self.input_cursor = self
             .selected_case()
-            .and_then(|(gi, ci)| self.doc.groups[gi].cases[ci].fields.get(STATUS_COLUMN))
+            .and_then(|(gi, ci)| self.doc.groups[gi].cases[ci].fields.get(DECISION_COLUMN))
             .map(|s| s.len())
             .unwrap_or(0);
     }
@@ -100,7 +100,7 @@ impl App {
         self.snapshot();
         let value = self.doc.groups[gi].cases[ci]
             .fields
-            .entry(STATUS_COLUMN.to_string())
+            .entry(DECISION_COLUMN.to_string())
             .or_default();
         let pos = self.input_cursor.min(value.len());
         value.insert(pos, c);
@@ -113,7 +113,7 @@ impl App {
         let Some((gi, ci)) = self.selected_case() else {
             return false;
         };
-        let Some(value) = self.doc.groups[gi].cases[ci].fields.get_mut(STATUS_COLUMN) else {
+        let Some(value) = self.doc.groups[gi].cases[ci].fields.get_mut(DECISION_COLUMN) else {
             return false;
         };
         if self.input_cursor == 0 || value.is_empty() {
@@ -127,7 +127,7 @@ impl App {
         self.snapshot();
         let value = self.doc.groups[gi].cases[ci]
             .fields
-            .get_mut(STATUS_COLUMN)
+            .get_mut(DECISION_COLUMN)
             .expect("field exists");
         value.replace_range(prev..self.input_cursor, "");
         self.input_cursor = prev;
@@ -145,7 +145,7 @@ impl App {
         if let Some((gi, ci)) = self.selected_case() {
             self.input_cursor = self.doc.groups[gi].cases[ci]
                 .fields
-                .get(STATUS_COLUMN)
+                .get(DECISION_COLUMN)
                 .map(|s| s.len())
                 .unwrap_or(0);
         }
@@ -157,7 +157,7 @@ impl App {
         };
         let value = self.doc.groups[gi].cases[ci]
             .fields
-            .get(STATUS_COLUMN)
+            .get(DECISION_COLUMN)
             .map(String::as_str)
             .unwrap_or("");
         if self.input_cursor == 0 {
@@ -177,7 +177,7 @@ impl App {
         };
         let value = self.doc.groups[gi].cases[ci]
             .fields
-            .get(STATUS_COLUMN)
+            .get(DECISION_COLUMN)
             .map(String::as_str)
             .unwrap_or("");
         if self.input_cursor >= value.len() {
@@ -196,7 +196,7 @@ impl App {
             return false;
         };
         {
-            let Some(value) = self.doc.groups[gi].cases[ci].fields.get(STATUS_COLUMN) else {
+            let Some(value) = self.doc.groups[gi].cases[ci].fields.get(DECISION_COLUMN) else {
                 return false;
             };
             if self.input_cursor >= value.len() {
@@ -206,7 +206,7 @@ impl App {
         self.snapshot();
         let value = self.doc.groups[gi].cases[ci]
             .fields
-            .get_mut(STATUS_COLUMN)
+            .get_mut(DECISION_COLUMN)
             .expect("field exists");
         value.truncate(self.input_cursor);
         self.dirty = true;
@@ -219,7 +219,7 @@ impl App {
         };
         let value = self.doc.groups[gi].cases[ci]
             .fields
-            .get(STATUS_COLUMN)
+            .get(DECISION_COLUMN)
             .cloned()
             .unwrap_or_default();
         self.undo_stack.push(UndoEntry {
@@ -247,10 +247,10 @@ impl App {
         }
         let case = &mut self.doc.groups[entry.group_idx].cases[entry.case_idx];
         if entry.value.is_empty() {
-            case.fields.insert(STATUS_COLUMN.to_string(), String::new());
+            case.fields.insert(DECISION_COLUMN.to_string(), String::new());
         } else {
             case.fields
-                .insert(STATUS_COLUMN.to_string(), entry.value.clone());
+                .insert(DECISION_COLUMN.to_string(), entry.value.clone());
         }
         self.input_cursor = entry.input_cursor;
         self.dirty = true;

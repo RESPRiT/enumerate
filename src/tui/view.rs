@@ -5,7 +5,7 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, BorderType, Borders, Padding, Paragraph, Widget, Wrap};
 
-use crate::doc::{Case, Doc, Group, STATUS_COLUMN};
+use crate::doc::{Case, Doc, Group, DECISION_COLUMN};
 
 use super::state::App;
 
@@ -226,7 +226,7 @@ fn compute_column_widths(table_width: u16, columns: &[String]) -> Vec<u16> {
 
     let constraints: Vec<Constraint> = std::iter::once(Constraint::Length(NUM_COL_WIDTH))
         .chain(columns.iter().map(|c| {
-            if c.eq_ignore_ascii_case(STATUS_COLUMN) {
+            if c.eq_ignore_ascii_case(DECISION_COLUMN) {
                 Constraint::Length(STATUS_COL_WIDTH)
             } else {
                 Constraint::Fill(1)
@@ -425,7 +425,7 @@ fn render_case_row(
 
     for (i, col) in columns.iter().enumerate() {
         let value = case.fields.get(col).cloned().unwrap_or_default();
-        let is_status = col.eq_ignore_ascii_case(STATUS_COLUMN);
+        let is_status = col.eq_ignore_ascii_case(DECISION_COLUMN);
         let is_selected = is_status
             && selection
                 .map(|s| s.case == (group_idx, case_idx))

@@ -44,7 +44,7 @@ Section-per-case markdown with YAML frontmatter.
 ---
 topic: enumerate-tui design
 created: 2026-04-07
-columns: [Setup, Expected, Status, Notes]
+columns: [Setup, Expected, Decision, Notes]
 ---
 
 # enumerate-tui design
@@ -61,14 +61,14 @@ H1 topic, H2 group, H3 case.
 **Expected:**
 Parser uses heading depth.
 
-**Status:** ?
+**Decision:** ?
 
 **Notes:**
 Optional alt: skip H1 if frontmatter has topic.
 
 ### #2 Field syntax
 
-**Status:** OK
+**Decision:** OK
 ````
 
 ### Rules
@@ -81,7 +81,7 @@ Optional alt: skip H1 if frontmatter has topic.
 - **H3:** case heading, must be `### #N Name` where N is a positive integer.
 - **Field markers:** `**FieldName:**` followed by inline value or block content. Block extends until next field marker, next H3, next H2, or EOF.
 - **Numbering:** stable, assigned at creation, gap-allowed. Never auto-renumbered. No reorder.
-- **Status column:** hardcoded as the TUI's input column, and must be the **last** column. Column name match is case-insensitive (`status`, `Status`, `STATUS` all match), canonicalized to `Status` on save. The parser moves Status to the end of `columns:` if found elsewhere. Free-text values; conventional values `!! / ! / ? / OK` are guidance only; the TUI does not enforce or interpret them.
+- **Decision column:** hardcoded as the TUI's input column. Templates and agent-written files do **not** include it; the binary appends it on load if not already present, and the TUI navigates it. Column name match is case-insensitive, canonicalized to `Decision` on save. Must be the last column; parser moves it to the end with a warning if found elsewhere. Free-text values; conventional values `!! / ! / ? / OK` are guidance only — the TUI does not enforce or interpret them.
 
 ### Tolerance table
 
@@ -97,8 +97,8 @@ Optional alt: skip H1 if frontmatter has topic.
 | Invalid YAML in frontmatter | **Fatal.** Refuse to load. |
 | Duplicate `#N` | Warn, load both. User must fix. |
 | Field key not in `columns:` | Warn, auto-add to `columns:` on save (appended) |
-| Status column missing from `columns:` | Warn, append `Status` to `columns:` and add empty Status field to every case |
-| Status column present but not last | Warn, move Status to the end of `columns:` |
+| Decision column missing from `columns:` | Append `Decision` to `columns:` and add empty Decision field to every case (no warning — this is normal for template-written files) |
+| Decision column present but not last | Warn, move Decision to the end of `columns:` |
 | Duplicate H2 group name | Warn, merge on display + save |
 | Empty group | Keep, no warning |
 | Case missing a column field | Empty value, no warning |
@@ -154,11 +154,11 @@ struct Warning {
 
 ## TUI
 
-**Mode:** browse-mode only. User navigates and edits Status cells in any order. Walk-mode (one item at a time, priority order) lives in the agent, not the TUI.
+**Mode:** browse-mode only. User navigates and edits Decision cells in any order. Walk-mode (one item at a time, priority order) lives in the agent, not the TUI.
 
-**Input column:** hardcoded to `Status`. The TUI does not navigate or edit any other column. Other columns render as read-only display for context.
+**Input column:** hardcoded to `Decision`. The TUI does not navigate or edit any other column. Other columns render as read-only display for context.
 
-**Status values:** displayed verbatim. No special icons, coloring, or validation.
+**Decision values:** displayed verbatim. No special icons, coloring, or validation.
 
 **Warnings:** sticky header shows a passive `⚠ N` indicator when N > 0. No interactive warnings panel in v1 — to inspect warnings, open the file in a text editor.
 
@@ -170,10 +170,10 @@ struct Warning {
 
 The `enumerate` skill is rewritten to:
 
-1. **Enumerate.** Write the section-per-case markdown to `./docs/<topic-slug>.md` in the project directory. Default columns `[Setup, Expected, Status, Notes]`. Custom columns allowed for specialized topics (e.g., security review: `[Risk, Mitigation, Severity, Status]`).
-2. **Open the TUI.** Run `enumerate popup <path>` via Bash. In tmux, this blocks until the popup closes; outside tmux, it returns immediately after printing the path.
+1. **Enumerate.** Pick one of the named templates (`default (revision)`, `exhaustiveness/coverage`, `design/ideation`, `task completion`, or `custom`) based on the topic, and write a section-per-case markdown file at `./docs/<topic-slug>.md`. Templates contain only **content columns** — they do *not* include the Decision column.
+2. **Open the TUI.** Run `enumerate popup <path>` via Bash. The binary auto-appends the Decision column on load. In tmux, the call blocks until the popup closes; outside tmux, it returns immediately after printing the path.
 3. **Wait** (out-of-tmux only). End the turn, ask the user to run `enumerate open <path>` and reply when done.
-4. **Walk.** Re-read the file. Process items one at a time in priority order driven by Status markers (`!! > ! > ? > OK`). One item, one decision.
+4. **Walk.** Re-read the file. Process items one at a time in priority order driven by Decision markers (`!! > ! > ? > OK`). One item, one decision.
 5. **Summarize and implement.** Same as the current skill.
 
 The skill markers `!! / ! / ? / OK` are documented as conventions; the TUI does not enforce them.

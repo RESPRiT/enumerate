@@ -18,30 +18,25 @@ fn empty_file() {
     let result = parse("").expect("empty file should parse");
     assert!(result.doc.groups.is_empty());
     assert!(result.doc.frontmatter.topic.is_none());
-    // Empty file has no Status column initially; post-processing adds one but no cases to update.
-    // No warnings expected for the empty case (no cases means nothing to add Status to).
-    // Actually post_process WILL warn because columns.is_empty triggers Status check.
-    // Let me allow that.
 }
 
 #[test]
 fn frontmatter_only() {
-    let input = "---\ntopic: foo\ncreated: 2026-04-07\ncolumns: [Status]\n---\n";
+    let input = "---\ntopic: foo\ncreated: 2026-04-07\ncolumns: [Decision]\n---\n";
     let result = parse(input).expect("parse should succeed");
     assert_eq!(result.doc.frontmatter.topic.as_deref(), Some("foo"));
     assert_eq!(result.doc.frontmatter.created.as_deref(), Some("2026-04-07"));
-    assert_eq!(result.doc.frontmatter.columns, vec!["Status"]);
+    assert_eq!(result.doc.frontmatter.columns, vec!["Decision"]);
     assert!(result.doc.groups.is_empty());
     assert!(result.warnings.is_empty());
 }
 
 #[test]
 fn missing_frontmatter_synthesizes() {
-    let input = "# Topic\n\n## Group\n\n### #1 Name\n\n**Status:** OK\n";
+    let input = "# Topic\n\n## Group\n\n### #1 Name\n\n**Decision:** OK\n";
     let result = parse(input).expect("parse should succeed");
     assert_eq!(result.doc.frontmatter.topic.as_deref(), Some("Topic"));
-    // Columns inferred from union
-    assert_eq!(result.doc.frontmatter.columns, vec!["Status"]);
+    assert_eq!(result.doc.frontmatter.columns, vec!["Decision"]);
     assert_eq!(result.doc.groups.len(), 1);
     assert_eq!(result.doc.groups[0].name.as_deref(), Some("Group"));
     assert_eq!(result.doc.groups[0].cases.len(), 1);
@@ -51,10 +46,13 @@ fn missing_frontmatter_synthesizes() {
 
 #[test]
 fn mixed_groups_and_ungrouped() {
-    let input = "# Topic\n\n### #1 Ungrouped case\n\n**Status:** OK\n\n## Group A\n\n### #2 Grouped case\n\n**Status:** ?\n";
+    let input = "# Topic\n\n### #1 Ungrouped case\n\n**Decision:** OK\n\n## Group A\n\n### #2 Grouped case\n\n**Decision:** ?\n";
     let result = parse(input).expect("parse should succeed");
     assert_eq!(result.doc.groups.len(), 2);
-    assert!(result.doc.groups[0].name.is_none(), "first group should be ungrouped");
+    assert!(
+        result.doc.groups[0].name.is_none(),
+        "first group should be ungrouped"
+    );
     assert_eq!(result.doc.groups[0].cases.len(), 1);
     assert_eq!(result.doc.groups[0].cases[0].number, 1);
     assert_eq!(result.doc.groups[1].name.as_deref(), Some("Group A"));
@@ -64,33 +62,42 @@ fn mixed_groups_and_ungrouped() {
 
 #[test]
 fn custom_columns_with_missing_fields() {
-    let input = "---\ncolumns: [Risk, Mitigation, Status]\n---\n\n# Security review\n\n### #1 SQL injection\n\n**Risk:** high\n\n**Status:** OK\n";
+    let input = "---\ncolumns: [Risk, Mitigation, Decision]\n---\n\n# Security review\n\n### #1 SQL injection\n\n**Risk:** high\n\n**Decision:** OK\n";
     let result = parse(input).expect("parse should succeed");
-    assert_eq!(result.doc.frontmatter.columns, vec!["Risk", "Mitigation", "Status"]);
+    assert_eq!(
+        result.doc.frontmatter.columns,
+        vec!["Risk", "Mitigation", "Decision"]
+    );
     let case = &result.doc.groups[0].cases[0];
     assert_eq!(case.fields.get("Risk").map(String::as_str), Some("high"));
-    assert_eq!(case.fields.get("Status").map(String::as_str), Some("OK"));
+    assert_eq!(case.fields.get("Decision").map(String::as_str), Some("OK"));
     assert!(case.fields.get("Mitigation").is_none());
 }
 
 #[test]
-fn missing_status_column_warns_and_appends() {
+fn missing_decision_column_appended_silently() {
+    // Templates produced by the agent contain only content columns; the binary
+    // appends Decision automatically on load with no warning.
     let input = "---\ncolumns: [Setup, Expected]\n---\n\n# Topic\n\n### #1 Name\n\n**Setup:** foo\n";
     let result = parse(input).expect("parse should succeed");
-    assert!(result.doc.frontmatter.columns.contains(&"Status".to_string()));
     assert!(
-        result.warnings.iter().any(|w| w.message.contains("Status column")),
-        "expected Status column warning, got: {:?}",
-        result.warnings.iter().map(|w| &w.message).collect::<Vec<_>>()
+        result.doc.frontmatter.columns.contains(&"Decision".to_string())
     );
-    // Every case should have an empty Status field
+    assert_eq!(
+        result.doc.frontmatter.columns.last().map(String::as_str),
+        Some("Decision")
+    );
+    assert!(
+        result.warnings.is_empty(),
+        "expected no warnings; missing Decision is normal for templates"
+    );
     let case = &result.doc.groups[0].cases[0];
-    assert_eq!(case.fields.get("Status").map(String::as_str), Some(""));
+    assert_eq!(case.fields.get("Decision").map(String::as_str), Some(""));
 }
 
 #[test]
 fn duplicate_case_numbers_warn() {
-    let input = "# Topic\n\n### #1 First\n\n**Status:** OK\n\n### #1 Second\n\n**Status:** ?\n";
+    let input = "# Topic\n\n### #1 First\n\n**Decision:** OK\n\n### #1 Second\n\n**Decision:** ?\n";
     let result = parse(input).expect("parse should succeed");
     assert_eq!(result.doc.groups[0].cases.len(), 2);
     assert!(
@@ -108,7 +115,7 @@ fn invalid_yaml_is_fatal() {
 
 #[test]
 fn unknown_block_inside_case_warned_and_dropped() {
-    let input = "# Topic\n\n### #1 Name\n\nThis is unknown content that isn't a field.\n\n**Status:** OK\n";
+    let input = "# Topic\n\n### #1 Name\n\nThis is unknown content that isn't a field.\n\n**Decision:** OK\n";
     let result = parse(input).expect("parse should succeed");
     assert!(
         result.warnings.iter().any(|w| w.message.contains("unknown content")),
@@ -122,15 +129,18 @@ fn unknown_block_inside_case_warned_and_dropped() {
 }
 
 #[test]
-fn status_not_last_is_reordered() {
-    let input = "---\ncolumns: [Setup, Status, Notes]\n---\n\n# Topic\n\n### #1 Name\n\n**Setup:** s\n\n**Status:** OK\n\n**Notes:** n\n";
+fn decision_not_last_is_reordered() {
+    let input = "---\ncolumns: [Setup, Decision, Notes]\n---\n\n# Topic\n\n### #1 Name\n\n**Setup:** s\n\n**Decision:** OK\n\n**Notes:** n\n";
     let result = parse(input).expect("parse should succeed");
     assert_eq!(
         result.doc.frontmatter.columns,
-        vec!["Setup", "Notes", "Status"]
+        vec!["Setup", "Notes", "Decision"]
     );
     assert!(
-        result.warnings.iter().any(|w| w.message.contains("Status column must")),
+        result
+            .warnings
+            .iter()
+            .any(|w| w.message.contains("Decision column must")),
         "expected reorder warning, got: {:?}",
         result.warnings.iter().map(|w| &w.message).collect::<Vec<_>>()
     );
@@ -138,7 +148,7 @@ fn status_not_last_is_reordered() {
 
 #[test]
 fn warning_severity_is_warn_not_fatal() {
-    let input = "---\ncolumns: [Setup]\n---\n\n# Topic\n\n### #1 Name\n\n**Setup:** foo\n";
+    let input = "---\ncolumns: [Setup, Decision, Notes]\n---\n\n# Topic\n\n### #1 Name\n\n**Setup:** foo\n";
     let result = parse(input).expect("parse should succeed");
     assert!(!result.warnings.is_empty());
     assert!(result.warnings.iter().all(|w| w.severity == Severity::Warn));

@@ -4,7 +4,7 @@ use anyhow::{Context, Result};
 use indexmap::{IndexMap, IndexSet};
 
 use super::{
-    Case, Doc, Frontmatter, Group, LoadResult, Location, STATUS_COLUMN, Severity, Warning,
+    Case, DECISION_COLUMN, Doc, Frontmatter, Group, LoadResult, Location, Severity, Warning,
 };
 
 pub fn parse(input: &str) -> Result<LoadResult> {
@@ -381,33 +381,28 @@ fn post_process(doc: &mut Doc, warnings: &mut Vec<Warning>, h1: Option<String>) 
         doc.frontmatter.columns = seen.into_iter().collect();
     }
 
-    let status_idx = doc
+    let decision_idx = doc
         .frontmatter
         .columns
         .iter()
-        .position(|c| c.eq_ignore_ascii_case(STATUS_COLUMN));
-    match status_idx {
+        .position(|c| c.eq_ignore_ascii_case(DECISION_COLUMN));
+    match decision_idx {
         None => {
-            doc.frontmatter.columns.push(STATUS_COLUMN.to_string());
-            warnings.push(Warning {
-                location: Location::Frontmatter,
-                message: "Status column missing from `columns:`; appended".to_string(),
-                severity: Severity::Warn,
-            });
+            doc.frontmatter.columns.push(DECISION_COLUMN.to_string());
             for group in &mut doc.groups {
                 for case in &mut group.cases {
                     case.fields
-                        .entry(STATUS_COLUMN.to_string())
+                        .entry(DECISION_COLUMN.to_string())
                         .or_default();
                 }
             }
         }
         Some(idx) if idx != doc.frontmatter.columns.len() - 1 => {
-            let status_name = doc.frontmatter.columns.remove(idx);
-            doc.frontmatter.columns.push(status_name);
+            let name = doc.frontmatter.columns.remove(idx);
+            doc.frontmatter.columns.push(name);
             warnings.push(Warning {
                 location: Location::Frontmatter,
-                message: "Status column must be the last column; reordered".to_string(),
+                message: "Decision column must be the last column; reordered".to_string(),
                 severity: Severity::Warn,
             });
         }

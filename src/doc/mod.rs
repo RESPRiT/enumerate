@@ -63,7 +63,9 @@ pub enum Severity {
 }
 
 /// The hardcoded name of the input column the TUI navigates and edits.
-pub const STATUS_COLUMN: &str = "Status";
+/// The binary appends this column on load if a file doesn't already have it,
+/// so templates produced by the agent should NOT include it themselves.
+pub const DECISION_COLUMN: &str = "Decision";
 
 impl Doc {
     /// Total number of cases across all groups.
@@ -71,14 +73,14 @@ impl Doc {
         self.groups.iter().map(|g| g.cases.len()).sum()
     }
 
-    /// Number of cases whose Status field is non-empty.
+    /// Number of cases whose Decision field is non-empty.
     pub fn filled_cases(&self) -> usize {
         self.groups
             .iter()
             .flat_map(|g| g.cases.iter())
             .filter(|c| {
                 c.fields
-                    .get(STATUS_COLUMN)
+                    .get(DECISION_COLUMN)
                     .map(|s| !s.trim().is_empty())
                     .unwrap_or(false)
             })

@@ -1,47 +1,47 @@
 ---
 topic: sample enumeration
-created: 2026-04-07
-columns: [Setup, Expected, Notes, Status]
+created: 2026-04-08
+columns: [Status Quo, Proposed Change, Reasoning, Decision]
 ---
 
 # sample enumeration
 
-A small sample to try out the TUI. Navigate with arrow keys, type into Status cells, press Enter on Submit (or Esc/Ctrl+C) to close.
+A small sample using the `default (revision)` template. Navigate with arrow keys, type into Decision cells, press Enter on Submit (or Esc/Ctrl+C) to close.
 
 ## Base cases
 
 The simplest cases the TUI should handle.
 
-### #1 Empty status
+### #1 Empty decision
 
-**Setup:** A case where Status hasn't been filled in yet.
+**Status Quo:** A case where the user hasn't decided yet.
 
-**Expected:** Renders as empty (greyed out).
+**Proposed Change:** Renders as empty (greyed out) until the user types something.
 
-**Notes:** Type something while this row is selected to see autosave.
+**Reasoning:** Empty Decision cells are the default state when a template is first opened — Claude doesn't populate them.
 
-**Status:**
+**Decision:**
 
-### #2 Pre-filled status
+### #2 Pre-filled decision
 
-**Setup:** A case where Status already has a value when the file loads.
+**Status Quo:** A case where Decision already has a value when the file loads.
 
-**Expected:** Renders the value in green (filled).
+**Proposed Change:** Renders the value in white (filled), with leading marker tokens like `OK`/`!`/`?`/`!!` highlighted in yellow.
 
-**Notes:** This one should look different from #1.
+**Reasoning:** Decisions persist across sessions; once you've decided, the value is on disk for the next walk.
 
-**Status:** OK
+**Decision:** OK
 
 ## Wrapping cases
 
 Cases that exercise text wrapping in cells.
 
-### #3 Long Setup
+### #3 Long content
 
-**Setup:** This is a very long Setup field that should wrap onto multiple lines inside its table cell. Markdown tables would truncate this; the whole point of the TUI is to show all of it.
+**Status Quo:** This is a very long Status Quo field that should wrap onto multiple lines inside its table cell. Markdown tables would truncate this; the whole point of the TUI is to show all of it.
 
-**Expected:** The row grows tall enough to fit all the wrapped text.
+**Proposed Change:** The row grows tall enough to fit all the wrapped text, and every other row in every other table grows to match (uniform row heights).
 
-**Notes:** Compare this to how the same content would look in a markdown table.
+**Reasoning:** Wrapping is the original motivation for the project. Compare this to how the same content would render in a plain markdown table.
 
-**Status:** ?
+**Decision:** ?
