@@ -22,7 +22,7 @@ pub fn run(file: &Path) -> Result<()> {
     );
 
     let status = Command::new("tmux")
-        .args(["display-popup", "-w", "90%", "-h", "90%", "-E", &inner])
+        .args(["display-popup", "-B", "-w", "90%", "-h", "90%", "-E", &inner])
         .status()
         .context("failed to spawn `tmux display-popup`")?;
 

@@ -3,7 +3,7 @@ use ratatui::buffer::Buffer;
 use ratatui::layout::{Alignment, Constraint, Layout, Position, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span, Text};
-use ratatui::widgets::{Block, Borders, Paragraph, Widget, Wrap};
+use ratatui::widgets::{Block, BorderType, Borders, Padding, Paragraph, Widget, Wrap};
 
 use crate::doc::{Case, Doc, Group, STATUS_COLUMN};
 
@@ -24,7 +24,9 @@ const COLOR_MARKER: Color = Color::Rgb(255, 230, 80);
 pub fn render(frame: &mut Frame, app: &mut App) {
     let area = frame.area();
 
-    let outer = Block::bordered();
+    let outer = Block::bordered()
+        .border_type(BorderType::Thick)
+        .padding(Padding::new(2, 2, 1, 1));
     let inner_area = outer.inner(area);
     frame.render_widget(outer, area);
 
