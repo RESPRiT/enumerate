@@ -170,7 +170,7 @@ struct Warning {
 
 The `enumerate` skill is rewritten to:
 
-1. **Enumerate.** Pick one of the named templates (`default (revision)`, `exhaustiveness/coverage`, `design/ideation`, `task completion`, or `custom`) based on the topic, and write a section-per-case markdown file at `./docs/<topic-slug>.md`. Templates contain only **content columns** — they do *not* include the Decision column.
+1. **Enumerate.** Pick one of the named templates (`default (revision)`, `exhaustiveness/coverage`, `design/ideation`, `task completion`, or `custom`) based on the topic, and write a section-per-case markdown file at `./.enumerate/<YYYY-MM-DD>-<topic-slug>.md`. Templates contain only **content columns** — they do *not* include the Decision column.
 2. **Open the TUI.** Run `enumerate popup <path>` via Bash. The binary auto-appends the Decision column on load. In tmux, the call blocks until the popup closes; outside tmux, it returns immediately after printing the path.
 3. **Wait** (out-of-tmux only). End the turn, ask the user to run `enumerate open <path>` and reply when done.
 4. **Walk.** Re-read the file. Process items one at a time in priority order driven by Decision markers (`!! > ! > ? > OK`). One item, one decision.

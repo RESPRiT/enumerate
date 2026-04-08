@@ -9,11 +9,14 @@ use ratatui::DefaultTerminal;
 use ratatui::crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 
 use crate::doc::{self, LoadResult};
+use crate::gitignore;
 
 pub fn run(file: &Path) -> Result<()> {
     let input = std::fs::read_to_string(file)
         .with_context(|| format!("failed to read {}", file.display()))?;
     let LoadResult { doc, warnings } = doc::parse(&input)?;
+
+    let _ = gitignore::ensure_enumerate_ignored(file);
 
     let mut app = state::App::new(file.to_path_buf(), doc, warnings);
 
