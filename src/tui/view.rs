@@ -503,6 +503,8 @@ fn render_case_row(
                     .fg(COLOR_BORDER_SELECTED)
                     .add_modifier(Modifier::BOLD),
             );
+        } else if is_status {
+            draw_thin_border(buf, cell_area, Style::new().fg(Color::Rgb(40, 40, 40)));
         }
 
         cx += widths[i + 1];
@@ -650,6 +652,43 @@ fn render_text_cell(buf: &mut Buffer, area: Rect, text: Text<'_>, style: Style) 
         .wrap(Wrap { trim: false })
         .style(style)
         .render(inner, buf);
+}
+
+fn draw_thin_border(buf: &mut Buffer, area: Rect, style: Style) {
+    if area.width < 2 || area.height < 2 {
+        return;
+    }
+    let r = area.x + area.width - 1;
+    let b = area.y + area.height - 1;
+
+    for &(x, y, ch) in &[
+        (area.x, area.y, '┌'),
+        (r, area.y, '┐'),
+        (area.x, b, '└'),
+        (r, b, '┘'),
+    ] {
+        if let Some(cell) = buf.cell_mut(Position::new(x, y)) {
+            cell.set_char(ch).set_style(style);
+        }
+    }
+
+    for x in area.x + 1..r {
+        if let Some(cell) = buf.cell_mut(Position::new(x, area.y)) {
+            cell.set_char('─').set_style(style);
+        }
+        if let Some(cell) = buf.cell_mut(Position::new(x, b)) {
+            cell.set_char('─').set_style(style);
+        }
+    }
+
+    for y in area.y + 1..b {
+        if let Some(cell) = buf.cell_mut(Position::new(area.x, y)) {
+            cell.set_char('│').set_style(style);
+        }
+        if let Some(cell) = buf.cell_mut(Position::new(r, y)) {
+            cell.set_char('│').set_style(style);
+        }
+    }
 }
 
 fn draw_thick_border(buf: &mut Buffer, area: Rect, style: Style) {
