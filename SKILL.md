@@ -60,22 +60,34 @@ The TUI is browse-mode; the walk happens here in chat, driven by you. Walk-step 
 
 After all items are resolved, present a summary table of decisions made. One row per case, action column on the right. Include any cases marked Disagree or Skip so the table covers everything in the doc, not just the walked items.
 
-### 6. Implement
+### 6. Update the doc
 
-If the decisions lead to code changes, implement them as you would any other coding task. After implementing, update the doc to mark resolved Decision markers and link test names to each case where applicable — that's the one piece of post-walk work that's specific to `/enumerate`.
+After the summary (not during the walk), update all resolved Decision markers in the enumeration doc in a single batch edit. Do not edit the doc once per decision — wait until the walk is complete and apply all changes at once.
+
+### 7. Implement
+
+If the decisions lead to code changes, implement them as you would any other coding task. After implementing, link test names to each case in the doc where applicable — that's the one piece of post-walk work that's specific to `/enumerate`.
 
 ## Walk discipline
 
 How to write each walk step:
 
-1. **Shape**: case header → recommendation → reasoning → ask. In that order, every step.
-2. **Quote the user's note inline** under the case header (e.g., `> Your note: *! Some bundling is fine*`) so they have context for why the case is being walked.
-3. **Separator** (`---`) on its own line between consecutive walk steps.
-4. **Length** is ≤10 lines typical, not strict — going under is fine, going over should be rare.
-5. **One decision per step.** Never bundle nested sub-questions; if discovered, defer them as new cases.
-6. **No trailing open questions** or "things to consider later." End each step with a single concrete ask.
-7. **Defer discovered sub-cases.** If a case spawns new sub-cases mid-walk, note them for a follow-up enumeration after the walk completes. Do not expand the current step.
-8. **Track derivations.** When one decision constrains a later case, note the dependency in your reasoning ("this follows from #4b"). Don't ask for redundant ratifications.
+1. **Shape**: marker badge → case header → quoted note → recommendation → why → ask. In that order, every step. For `?` items (user needs clarification), replace recommendation+why with a plain explanation, then ask.
+2. **Labels**: `**Recommendation:**`, `**Why:**`, `**Ask:**`. For `?` items, the explanation has no label — just prose between the quoted note and the **Ask:** line.
+3. **Case header**: `` `(!!)` **#N Case name** `` — inline-code-wrapped marker badge (one of `(!!)`, `(!)`, `(?)`) followed by bold `#N` and name. No H3 — bold text only.
+4. **Quoted note**: `> Your note: *user's commentary*` — strip the marker prefix from the quote (it's already in the badge). Italicize the note text.
+5. **Divider + counter** between consecutive walk steps (not before the first step). Two-line block, both inline-code-wrapped:
+   - Line 1: 60 `━` characters (U+2501 heavy horizontal)
+   - Line 2: right-aligned `[N of M]` counter, padded with leading spaces so its right edge aligns with column 60 (i.e., 60 minus the length of the counter string)
+   - No blank line between the divider and the next case header — they sit flush.
+6. **Orientation header**: first line of the walk, before the first case: `**Walking N items:** ` `` `!!` `` ` × A, ` `` `!` `` ` × B, ` `` `?` `` ` × C.` — tallies by marker type.
+7. **One item per message.** Each agent turn walks exactly one case. The divider+counter appears at the top of every turn except the first.
+8. **Confirmation on resolve.** When the user gives a decision, confirm with: the case header (badge + `#N` + name), then `Noted — [summary of decision]. Moving on.` on the next line. Then the divider+counter and next case follow. If it's the last item, the confirmation precedes the summary table instead.
+9. **Length** is ≤10 lines typical, not strict — going under is fine, going over should be rare.
+10. **One decision per step.** Never bundle nested sub-questions; if discovered, defer them as new cases.
+11. **No trailing open questions** or "things to consider later." End each step with a single concrete ask.
+12. **Defer discovered sub-cases.** If a case spawns new sub-cases mid-walk, note them for a follow-up enumeration after the walk completes. Do not expand the current step.
+13. **Track derivations.** When one decision constrains a later case, note the dependency in your reasoning ("this follows from #4b"). Don't ask for redundant ratifications.
 
 ## Enumeration discipline
 
