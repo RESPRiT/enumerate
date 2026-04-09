@@ -16,6 +16,8 @@ const NUM_COL_WIDTH: u16 = 12;
 const STATUS_COL_WIDTH: u16 = 15;
 const SUBMIT_WIDTH: u16 = 30;
 const SUBMIT_HEIGHT: u16 = 3;
+const MAX_TEXT_LINES: u16 = 3;
+const MAX_ROW_HEIGHT: u16 = MAX_TEXT_LINES + 2; // 1 pad + 3 text + 1 pad
 
 const COLOR_BORDER_FADED: Color = Color::DarkGray;
 const COLOR_BORDER_SELECTED: Color = Color::Cyan;
@@ -136,32 +138,75 @@ fn render_body(frame: &mut Frame, area: Rect, app: &mut App) {
         return;
     }
 
-    let plan = compute_layout(&app.doc, area.width);
+    let plan = compute_layout(&app.doc, area.width, app.selected_case());
+
+    let expand_extra = plan.expanded.as_ref()
+        .map(|e| e.height.saturating_sub(plan.groups[e.group_idx].row_height))
+        .unwrap_or(0);
+    let content_height = plan.total_height + expand_extra;
 
     if app.cursor == 0 {
         // Snap to top so the first group's header and description are visible.
         app.scroll = 0;
     } else if app.cursor < plan.cursor_positions.len() {
         let pos = plan.cursor_positions[app.cursor];
+        let need_top = pos.top;
+        let mut need_bottom = pos.bottom;
+
+        // When expanded, extend the scroll target to include the input
+        // cursor's actual y-position within the expanded Decision cell.
+        if let Some(ref expanded) = plan.expanded {
+            let (gi, ci) = (expanded.group_idx, expanded.case_idx);
+            let value = app.doc.groups[gi].cases[ci]
+                .fields
+                .get(DECISION_COLUMN)
+                .map(String::as_str)
+                .unwrap_or("");
+            let col_idx = app
+                .doc
+                .frontmatter
+                .columns
+                .iter()
+                .position(|c| c.eq_ignore_ascii_case(DECISION_COLUMN))
+                .unwrap_or(0);
+            let inner_w = plan.groups[gi].column_widths[col_idx + 1].saturating_sub(2);
+            let prefix = &value[..app.input_cursor.min(value.len())];
+            let cursor_line = if inner_w == 0 || prefix.is_empty() {
+                0
+            } else {
+                wrap_height(prefix, inner_w).saturating_sub(1)
+            };
+            let cursor_y = expanded.y + 1 + cursor_line;
+            need_bottom = need_bottom.max(cursor_y + 1);
+        }
+
+        let range = need_bottom.saturating_sub(need_top);
         let eighth = area.height / 8;
 
-        if pos.top < app.scroll + eighth && app.scroll > 0 {
-            // In upper eighth (or above viewport) — scroll to center.
-            let mid = (pos.top + pos.bottom) / 2;
+        if range > area.height {
+            // Target taller than viewport — keep cursor visible, sacrifice top.
+            app.scroll = need_bottom.saturating_sub(area.height);
+        } else if need_top < app.scroll || need_bottom > app.scroll + area.height {
+            // Off-screen — center.
+            let mid = (need_top + need_bottom) / 2;
             app.scroll = mid.saturating_sub(area.height / 2);
-        } else if pos.bottom > app.scroll + area.height.saturating_sub(eighth) {
-            // In lower eighth (or below viewport) — scroll to center.
-            let mid = (pos.top + pos.bottom) / 2;
+        } else if need_top < app.scroll + eighth && app.scroll > 0 {
+            // Upper eighth — center.
+            let mid = (need_top + need_bottom) / 2;
+            app.scroll = mid.saturating_sub(area.height / 2);
+        } else if need_bottom > app.scroll + area.height.saturating_sub(eighth) {
+            // Lower eighth — center.
+            let mid = (need_top + need_bottom) / 2;
             app.scroll = mid.saturating_sub(area.height / 2);
         }
     }
 
-    let max_scroll = plan.total_height.saturating_sub(area.height);
+    let max_scroll = content_height.saturating_sub(area.height);
     if app.scroll > max_scroll {
         app.scroll = max_scroll;
     }
 
-    let buf_height = plan.total_height.max(SUBMIT_HEIGHT);
+    let buf_height = content_height.max(SUBMIT_HEIGHT);
     let mut tall = Buffer::empty(Rect::new(0, 0, area.width, buf_height));
 
     render_to_tall_buffer(&mut tall, app, &plan);
@@ -178,6 +223,17 @@ struct LayoutPlan {
     groups: Vec<GroupLayout>,
     /// y position where the Submit button starts.
     submit_y: u16,
+    /// If the selected row needs more than the capped height, stores expansion info.
+    expanded: Option<ExpandedRow>,
+}
+
+struct ExpandedRow {
+    group_idx: usize,
+    case_idx: usize,
+    /// Y position of the row in the tall buffer.
+    y: u16,
+    /// Natural (uncapped) height of the row.
+    height: u16,
 }
 
 #[derive(Clone)]
@@ -198,18 +254,17 @@ struct CursorRect {
     bottom: u16,
 }
 
-fn compute_layout(doc: &Doc, width: u16) -> LayoutPlan {
+fn compute_layout(doc: &Doc, width: u16, selection: Option<(usize, usize)>) -> LayoutPlan {
     let mut y = 0u16;
     let mut positions = Vec::new();
     let mut groups = Vec::new();
+    let mut expanded = None;
 
-    // Column widths and row height are computed globally so every table renders
-    // with the same dimensions, regardless of which group's cases happen to need
-    // the most vertical space.
     let column_widths = compute_column_widths(width, &doc.frontmatter.columns);
-    let row_height = compute_global_row_height(&doc.groups, &doc.frontmatter.columns, &column_widths);
+    let row_height = compute_global_row_height(&doc.groups, &doc.frontmatter.columns, &column_widths)
+        .min(MAX_ROW_HEIGHT);
 
-    for group in &doc.groups {
+    for (gi, group) in doc.groups.iter().enumerate() {
         let group_y = y;
 
         let header_h = if group.name.is_some() { 2 } else { 0 };
@@ -230,10 +285,22 @@ fn compute_layout(doc: &Doc, width: u16) -> LayoutPlan {
 
         // Cursor positions for each case row (in body coords)
         let row_start_y = table_y + 1 + header_strip; // +1 for outer top border
-        for ci in 0..group.cases.len() {
+        for (ci, case) in group.cases.iter().enumerate() {
             let top = row_start_y + (ci as u16) * row_height;
             let bottom = top + row_height;
             positions.push(CursorRect { top, bottom });
+
+            if selection == Some((gi, ci)) {
+                let natural_h = compute_case_row_height(case, &doc.frontmatter.columns, &column_widths);
+                if natural_h > row_height {
+                    expanded = Some(ExpandedRow {
+                        group_idx: gi,
+                        case_idx: ci,
+                        y: top,
+                        height: natural_h,
+                    });
+                }
+            }
         }
 
         y += 1; // group spacing
@@ -261,6 +328,7 @@ fn compute_layout(doc: &Doc, width: u16) -> LayoutPlan {
         cursor_positions: positions,
         groups,
         submit_y,
+        expanded,
     }
 }
 
@@ -282,40 +350,38 @@ fn compute_column_widths(table_width: u16, columns: &[String]) -> Vec<u16> {
     areas.iter().map(|r| r.width).collect()
 }
 
-fn compute_global_row_height(groups: &[Group], columns: &[String], widths: &[u16]) -> u16 {
-    let mut max_h = 3u16; // minimum: 1 char top padding + 1 line text + 1 char bottom padding
-
-    for group in groups {
-        for case in &group.cases {
-            let num_inner = widths[0].saturating_sub(2);
-            let num_text = format!("#{} {}", case.number, case.name);
-            let h = wrap_height(&num_text, num_inner) + 2;
-            max_h = max_h.max(h);
-
-            for (i, col) in columns.iter().enumerate() {
-                let value = case.fields.get(col).cloned().unwrap_or_default();
-                let inner = widths[i + 1].saturating_sub(2);
-                let h = wrap_height(&value, inner) + 2;
-                max_h = max_h.max(h);
-            }
-        }
+fn compute_case_row_height(case: &Case, columns: &[String], widths: &[u16]) -> u16 {
+    let mut max_h = 3u16; // minimum: 1 pad + 1 text + 1 pad
+    let num_inner = widths[0].saturating_sub(2);
+    let num_text = format!("#{} {}", case.number, case.name);
+    max_h = max_h.max(wrap_height(&num_text, num_inner) + 2);
+    for (i, col) in columns.iter().enumerate() {
+        let value = case.fields.get(col).cloned().unwrap_or_default();
+        let inner = widths[i + 1].saturating_sub(2);
+        max_h = max_h.max(wrap_height(&value, inner) + 2);
     }
-
     max_h
+}
+
+fn compute_global_row_height(groups: &[Group], columns: &[String], widths: &[u16]) -> u16 {
+    groups
+        .iter()
+        .flat_map(|g| g.cases.iter())
+        .map(|case| compute_case_row_height(case, columns, widths))
+        .max()
+        .unwrap_or(3)
 }
 
 fn estimate_para_height(text: &str, width: u16) -> u16 {
     if text.is_empty() || width == 0 {
         return 0;
     }
-    let mut total = 0u16;
-    for line in text.lines() {
-        let chars = line.chars().count() as u16;
-        total += if chars == 0 { 1 } else { chars.div_ceil(width) };
-    }
-    total.max(1)
+    wrap_height(text, width)
 }
 
+/// Count wrapped lines matching Ratatui's `Paragraph::wrap` (word-boundary
+/// breaking). Character-count division underestimates because word boundaries
+/// can leave lines shorter than the full width.
 fn wrap_height(text: &str, width: u16) -> u16 {
     if width == 0 {
         return 1;
@@ -323,12 +389,54 @@ fn wrap_height(text: &str, width: u16) -> u16 {
     if text.is_empty() {
         return 1;
     }
+    let w = width as usize;
     let mut total = 0u16;
     for line in text.lines() {
-        let chars = line.chars().count() as u16;
-        total += if chars == 0 { 1 } else { chars.div_ceil(width) };
+        if line.is_empty() {
+            total += 1;
+            continue;
+        }
+        total += wrap_line_count(line, w);
     }
     total.max(1)
+}
+
+/// Count how many visual lines a single logical line occupies when
+/// word-wrapped at `width` columns (greedy line-filling, break long words).
+fn wrap_line_count(line: &str, width: usize) -> u16 {
+    let mut lines = 1u16;
+    let mut col = 0usize;
+
+    for word in line.split(' ') {
+        let wlen = word.chars().count();
+
+        if col == 0 {
+            // Start of a visual line.
+            if wlen <= width {
+                col = wlen;
+            } else {
+                // Forced mid-word break.
+                let extra = (wlen - 1) / width;
+                lines += extra as u16;
+                col = wlen - extra * width;
+            }
+        } else if col + 1 + wlen <= width {
+            // Word + separator space fits on the current line.
+            col += 1 + wlen;
+        } else {
+            // Wrap to the next line.
+            lines += 1;
+            if wlen <= width {
+                col = wlen;
+            } else {
+                let extra = (wlen - 1) / width;
+                lines += extra as u16;
+                col = wlen - extra * width;
+            }
+        }
+    }
+
+    lines
 }
 
 fn render_to_tall_buffer(buf: &mut Buffer, app: &App, plan: &LayoutPlan) {
@@ -364,6 +472,37 @@ fn render_to_tall_buffer(buf: &mut Buffer, app: &App, plan: &LayoutPlan) {
 
         debug_assert_eq!(y, layout.table_y);
         render_table(buf, layout.table_y, width, group, gi, &app.doc.frontmatter.columns, layout, selection);
+    }
+
+    // Expanded row overlay: re-render the selected row at full height on top.
+    if let Some(ref expanded) = plan.expanded {
+        let group = &app.doc.groups[expanded.group_idx];
+        let case = &group.cases[expanded.case_idx];
+        let layout = &plan.groups[expanded.group_idx];
+        let inner_x = 1u16;
+        let inner_w = width.saturating_sub(2);
+
+        // Clear the expanded area so rows below don't bleed through.
+        for cy in expanded.y..expanded.y + expanded.height {
+            for cx in inner_x..inner_x + inner_w {
+                if let Some(cell) = buf.cell_mut(Position::new(cx, cy)) {
+                    cell.reset();
+                }
+            }
+        }
+
+        render_case_row(
+            buf,
+            inner_x,
+            expanded.y,
+            expanded.height,
+            &layout.column_widths,
+            case,
+            &app.doc.frontmatter.columns,
+            expanded.group_idx,
+            expanded.case_idx,
+            selection,
+        );
     }
 
     render_submit_button(buf, plan.submit_y, width, app.is_on_submit());
@@ -455,14 +594,17 @@ fn render_case_row(
     selection: Option<CellSelection>,
 ) {
     let mut cx = base_x;
+    let text_h = height.saturating_sub(2);
 
     // # column
     let num_text = format!("#{} {}", case.number, case.name);
+    let num_trunc = wrap_height(&num_text, widths[0].saturating_sub(2)) > text_h;
     render_text_cell(
         buf,
         Rect::new(cx, base_y, widths[0], height),
         Text::from(num_text),
         Style::new().fg(COLOR_TEXT_FILLED),
+        num_trunc,
     );
     cx += widths[0];
 
@@ -492,8 +634,9 @@ fn render_case_row(
             Text::from(value.clone())
         };
 
+        let truncated = wrap_height(&value, widths[i + 1].saturating_sub(2)) > text_h;
         let cell_area = Rect::new(cx, base_y, widths[i + 1], height);
-        render_text_cell(buf, cell_area, cell_text, base_style);
+        render_text_cell(buf, cell_area, cell_text, base_style, truncated);
 
         if is_selected {
             draw_thick_border(
@@ -641,7 +784,7 @@ fn segment_value(value: &str) -> Vec<StatusSegment> {
     segments
 }
 
-fn render_text_cell(buf: &mut Buffer, area: Rect, text: Text<'_>, style: Style) {
+fn render_text_cell(buf: &mut Buffer, area: Rect, text: Text<'_>, style: Style, truncated: bool) {
     let inner = Rect::new(
         area.x + 1,
         area.y + 1,
@@ -652,6 +795,14 @@ fn render_text_cell(buf: &mut Buffer, area: Rect, text: Text<'_>, style: Style) 
         .wrap(Wrap { trim: false })
         .style(style)
         .render(inner, buf);
+
+    if truncated && inner.width > 0 && inner.height > 0 {
+        let ex = inner.x + inner.width - 1;
+        let ey = inner.y + inner.height - 1;
+        if let Some(cell) = buf.cell_mut(Position::new(ex, ey)) {
+            cell.set_char('…').set_style(Style::new().fg(Color::DarkGray));
+        }
+    }
 }
 
 fn draw_thin_border(buf: &mut Buffer, area: Rect, style: Style) {
