@@ -1,6 +1,11 @@
-//! Auto-add `.enumerate/` to the local `.gitignore` when the TUI opens a file
-//! inside a `.enumerate/` directory inside a git repo. Best-effort: any failure
-//! is swallowed by the caller.
+//! Auto-add `.enumerate/` to the local `.git/info/exclude` when the TUI opens
+//! a file inside a `.enumerate/` directory inside a git repo. `.git/info/exclude`
+//! is git's per-clone ignore file — never tracked, never committed — so the
+//! auto-ignore doesn't pollute the shared repository state. Best-effort: any
+//! failure is swallowed by the caller.
+//!
+//! If the project's tracked `.gitignore` already excludes `.enumerate/` (or
+//! carries the opt-out marker), the binary respects that and writes nothing.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -21,8 +26,19 @@ pub fn ensure_enumerate_ignored(file: &Path) -> Result<()> {
         return Ok(());
     };
 
+    // If the tracked .gitignore already excludes .enumerate/ or carries the
+    // opt-out marker, respect that and don't write to .git/info/exclude.
     let gitignore_path = repo_root.join(".gitignore");
-    let existing = match fs::read_to_string(&gitignore_path) {
+    if let Ok(existing) = fs::read_to_string(&gitignore_path)
+        && already_handled(&existing)
+    {
+        return Ok(());
+    }
+
+    let exclude_dir = repo_root.join(".git").join("info");
+    let exclude_path = exclude_dir.join("exclude");
+
+    let existing = match fs::read_to_string(&exclude_path) {
         Ok(s) => s,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
         Err(e) => return Err(e.into()),
@@ -44,7 +60,8 @@ pub fn ensure_enumerate_ignored(file: &Path) -> Result<()> {
     new_content.push_str(ENTRY);
     new_content.push('\n');
 
-    fs::write(&gitignore_path, new_content)?;
+    fs::create_dir_all(&exclude_dir)?;
+    fs::write(&exclude_path, new_content)?;
     Ok(())
 }
 
@@ -72,7 +89,7 @@ fn find_git_root(start: &Path) -> Option<PathBuf> {
     }
 }
 
-/// True if the gitignore already contains either the entry or our header
+/// True if the content already contains either the entry or our header
 /// comment. The header acts as an opt-out marker: if the user removes the
 /// entry but leaves the header, we treat it as "the user has decided" and
 /// don't re-add anything.
@@ -98,7 +115,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn finds_enumerate_ancestor() {
+    fn finds_enumerate_ancestor_basic() {
         let p = PathBuf::from("/repo/.enumerate/2026-04-08-foo.md");
         assert_eq!(
             find_enumerate_ancestor(&p),
@@ -147,24 +164,7 @@ mod tests {
     }
 
     #[test]
-    fn ensure_respects_header_optout() {
-        let tmp = tempdir();
-        fs::create_dir(tmp.join(".git")).unwrap();
-        let original = "target/\n# enumerate decision docs\n";
-        fs::write(tmp.join(".gitignore"), original).unwrap();
-        let dir = tmp.join(".enumerate");
-        fs::create_dir(&dir).unwrap();
-        let file = dir.join("foo.md");
-        fs::write(&file, "x").unwrap();
-
-        ensure_enumerate_ignored(&file).unwrap();
-
-        let gi = fs::read_to_string(tmp.join(".gitignore")).unwrap();
-        assert_eq!(gi, original);
-    }
-
-    #[test]
-    fn ensure_creates_gitignore_in_temp_repo() {
+    fn ensure_creates_exclude_in_temp_repo() {
         let tmp = tempdir();
         fs::create_dir(tmp.join(".git")).unwrap();
         let dir = tmp.join(".enumerate");
@@ -174,16 +174,22 @@ mod tests {
 
         ensure_enumerate_ignored(&file).unwrap();
 
-        let gi = fs::read_to_string(tmp.join(".gitignore")).unwrap();
-        assert!(gi.contains(".enumerate/"));
-        assert!(gi.contains("# enumerate decision docs"));
+        // The local exclude file gets created with the header + entry.
+        let exclude = fs::read_to_string(tmp.join(".git/info/exclude")).unwrap();
+        assert!(exclude.contains(".enumerate/"));
+        assert!(exclude.contains("# enumerate decision docs"));
+
+        // The tracked .gitignore is untouched.
+        assert!(!tmp.join(".gitignore").exists());
     }
 
     #[test]
-    fn ensure_appends_to_existing_gitignore() {
+    fn ensure_creates_info_dir_if_missing() {
         let tmp = tempdir();
         fs::create_dir(tmp.join(".git")).unwrap();
-        fs::write(tmp.join(".gitignore"), "target/\n").unwrap();
+        // Note: .git/info does not exist yet — the binary must create it.
+        assert!(!tmp.join(".git/info").exists());
+
         let dir = tmp.join(".enumerate");
         fs::create_dir(&dir).unwrap();
         let file = dir.join("foo.md");
@@ -191,17 +197,18 @@ mod tests {
 
         ensure_enumerate_ignored(&file).unwrap();
 
-        let gi = fs::read_to_string(tmp.join(".gitignore")).unwrap();
-        assert!(gi.starts_with("target/\n"));
-        assert!(gi.contains(".enumerate/"));
+        assert!(tmp.join(".git/info/exclude").exists());
     }
 
     #[test]
-    fn ensure_is_noop_when_already_present() {
+    fn ensure_appends_to_existing_exclude() {
         let tmp = tempdir();
-        fs::create_dir(tmp.join(".git")).unwrap();
-        let original = "target/\n.enumerate/\n";
-        fs::write(tmp.join(".gitignore"), original).unwrap();
+        fs::create_dir_all(tmp.join(".git/info")).unwrap();
+        fs::write(
+            tmp.join(".git/info/exclude"),
+            "# git ls-files --others --exclude-from=.git/info/exclude\n*~\n",
+        )
+        .unwrap();
         let dir = tmp.join(".enumerate");
         fs::create_dir(&dir).unwrap();
         let file = dir.join("foo.md");
@@ -209,8 +216,80 @@ mod tests {
 
         ensure_enumerate_ignored(&file).unwrap();
 
-        let gi = fs::read_to_string(tmp.join(".gitignore")).unwrap();
-        assert_eq!(gi, original);
+        let exclude = fs::read_to_string(tmp.join(".git/info/exclude")).unwrap();
+        assert!(exclude.starts_with("# git ls-files"));
+        assert!(exclude.contains("*~"));
+        assert!(exclude.contains(".enumerate/"));
+        assert!(exclude.contains("# enumerate decision docs"));
+    }
+
+    #[test]
+    fn ensure_is_noop_when_exclude_already_has_entry() {
+        let tmp = tempdir();
+        fs::create_dir_all(tmp.join(".git/info")).unwrap();
+        let original = "*~\n.enumerate/\n";
+        fs::write(tmp.join(".git/info/exclude"), original).unwrap();
+        let dir = tmp.join(".enumerate");
+        fs::create_dir(&dir).unwrap();
+        let file = dir.join("foo.md");
+        fs::write(&file, "x").unwrap();
+
+        ensure_enumerate_ignored(&file).unwrap();
+
+        let exclude = fs::read_to_string(tmp.join(".git/info/exclude")).unwrap();
+        assert_eq!(exclude, original);
+    }
+
+    #[test]
+    fn ensure_respects_gitignore_existing_entry() {
+        // If a project commits .enumerate/ to its tracked .gitignore, the
+        // binary respects that and doesn't also write to .git/info/exclude.
+        let tmp = tempdir();
+        fs::create_dir(tmp.join(".git")).unwrap();
+        fs::write(tmp.join(".gitignore"), "target/\n.enumerate/\n").unwrap();
+        let dir = tmp.join(".enumerate");
+        fs::create_dir(&dir).unwrap();
+        let file = dir.join("foo.md");
+        fs::write(&file, "x").unwrap();
+
+        ensure_enumerate_ignored(&file).unwrap();
+
+        // .git/info/exclude was not touched.
+        assert!(!tmp.join(".git/info/exclude").exists());
+    }
+
+    #[test]
+    fn ensure_respects_gitignore_header_optout() {
+        // Header in .gitignore without the entry = explicit opt-out.
+        let tmp = tempdir();
+        fs::create_dir(tmp.join(".git")).unwrap();
+        fs::write(tmp.join(".gitignore"), "target/\n# enumerate decision docs\n").unwrap();
+        let dir = tmp.join(".enumerate");
+        fs::create_dir(&dir).unwrap();
+        let file = dir.join("foo.md");
+        fs::write(&file, "x").unwrap();
+
+        ensure_enumerate_ignored(&file).unwrap();
+
+        assert!(!tmp.join(".git/info/exclude").exists());
+    }
+
+    #[test]
+    fn ensure_respects_exclude_header_optout() {
+        // Header in .git/info/exclude without the entry = explicit opt-out.
+        let tmp = tempdir();
+        fs::create_dir_all(tmp.join(".git/info")).unwrap();
+        let original = "*~\n# enumerate decision docs\n";
+        fs::write(tmp.join(".git/info/exclude"), original).unwrap();
+        let dir = tmp.join(".enumerate");
+        fs::create_dir(&dir).unwrap();
+        let file = dir.join("foo.md");
+        fs::write(&file, "x").unwrap();
+
+        ensure_enumerate_ignored(&file).unwrap();
+
+        let exclude = fs::read_to_string(tmp.join(".git/info/exclude")).unwrap();
+        assert_eq!(exclude, original);
     }
 
     #[test]
@@ -224,6 +303,7 @@ mod tests {
         ensure_enumerate_ignored(&file).unwrap();
 
         assert!(!tmp.join(".gitignore").exists());
+        assert!(!tmp.join(".git/info/exclude").exists());
     }
 
     #[test]
@@ -236,6 +316,7 @@ mod tests {
         ensure_enumerate_ignored(&file).unwrap();
 
         assert!(!tmp.join(".gitignore").exists());
+        assert!(!tmp.join(".git/info/exclude").exists());
     }
 
     /// Minimal tempdir helper that picks a unique path under std::env::temp_dir.

@@ -40,7 +40,7 @@ The four markers are conventions the agent walks by — the TUI just stores them
 
 See [`SKILL.md`](SKILL.md) for the full skill spec and [`docs/V1_SPEC.md`](docs/V1_SPEC.md) for the binary's storage format, parser rules, and TUI contract.
 
-> The first time the TUI opens a file inside `.enumerate/` in a git repo, it appends `.enumerate/` to the repo's `.gitignore` (creating the file if needed). Decision docs are working notes — keep them out of version control by default. If you want to commit them, remove the entry and the binary won't re-add it.
+> The first time the TUI opens a file inside `.enumerate/` in a git repo, it appends `.enumerate/` to the local `.git/info/exclude` (creating the file if needed). That's git's per-clone ignore mechanism — never tracked, never committed — so the auto-ignore doesn't pollute the shared repository state. Each clone of the repo gets its own. Decision docs are working notes — keep them out of version control by default. If your project explicitly wants to commit decision docs, remove the entry from `.git/info/exclude` (the binary respects the opt-out marker and won't re-add); if you want a team-wide ignore, commit `.enumerate/` to the tracked `.gitignore` and the binary will respect that and skip writing to the local exclude.
 
 ## Setup
 
