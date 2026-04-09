@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::path::PathBuf;
 
 use anyhow::Result;
@@ -34,6 +35,9 @@ pub struct App {
     /// modes; `Some` only when launched with `--backdrop-pane`.
     pub backdrop: Option<Text<'static>>,
     undo_stack: Vec<UndoEntry>,
+    /// Cases whose progress has been "committed" by navigating away while
+    /// non-empty. Progress only changes on navigation, not on each keystroke.
+    progress: HashSet<(usize, usize)>,
 }
 
 impl App {
@@ -44,9 +48,18 @@ impl App {
         backdrop: Option<Text<'static>>,
     ) -> Self {
         let mut selectable = Vec::new();
+        let mut progress = HashSet::new();
         for (gi, group) in doc.groups.iter().enumerate() {
-            for ci in 0..group.cases.len() {
+            for (ci, case) in group.cases.iter().enumerate() {
                 selectable.push((gi, ci));
+                if case
+                    .fields
+                    .get(DECISION_COLUMN)
+                    .map(|s| !s.trim().is_empty())
+                    .unwrap_or(false)
+                {
+                    progress.insert((gi, ci));
+                }
             }
         }
         let mut app = Self {
@@ -61,6 +74,7 @@ impl App {
             dirty: false,
             backdrop,
             undo_stack: Vec::new(),
+            progress,
         };
         app.reset_input_cursor();
         app
@@ -84,6 +98,7 @@ impl App {
 
     pub fn move_down(&mut self) {
         if self.cursor < self.submit_index() {
+            self.commit_current_progress();
             self.cursor += 1;
             self.reset_input_cursor();
         }
@@ -91,6 +106,7 @@ impl App {
 
     pub fn move_up(&mut self) {
         if self.cursor > 0 {
+            self.commit_current_progress();
             self.cursor -= 1;
             self.reset_input_cursor();
         }
@@ -280,6 +296,24 @@ impl App {
     }
 
     pub fn filled_cases(&self) -> usize {
-        self.doc.filled_cases()
+        self.progress.len()
+    }
+
+    /// Evaluate the currently-selected case and update the progress set.
+    /// Called just before the cursor moves away from a cell.
+    fn commit_current_progress(&mut self) {
+        let Some((gi, ci)) = self.selected_case() else {
+            return;
+        };
+        let is_filled = self.doc.groups[gi].cases[ci]
+            .fields
+            .get(DECISION_COLUMN)
+            .map(|s| !s.trim().is_empty())
+            .unwrap_or(false);
+        if is_filled {
+            self.progress.insert((gi, ci));
+        } else {
+            self.progress.remove(&(gi, ci));
+        }
     }
 }

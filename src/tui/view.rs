@@ -143,10 +143,16 @@ fn render_body(frame: &mut Frame, area: Rect, app: &mut App) {
         app.scroll = 0;
     } else if app.cursor < plan.cursor_positions.len() {
         let pos = plan.cursor_positions[app.cursor];
-        if pos.top < app.scroll {
-            app.scroll = pos.top;
-        } else if pos.bottom > app.scroll + area.height {
-            app.scroll = pos.bottom.saturating_sub(area.height);
+        let eighth = area.height / 8;
+
+        if pos.top < app.scroll + eighth && app.scroll > 0 {
+            // In upper eighth (or above viewport) — scroll to center.
+            let mid = (pos.top + pos.bottom) / 2;
+            app.scroll = mid.saturating_sub(area.height / 2);
+        } else if pos.bottom > app.scroll + area.height.saturating_sub(eighth) {
+            // In lower eighth (or below viewport) — scroll to center.
+            let mid = (pos.top + pos.bottom) / 2;
+            app.scroll = mid.saturating_sub(area.height / 2);
         }
     }
 
@@ -603,10 +609,18 @@ fn segment_value(value: &str) -> Vec<StatusSegment> {
         .unwrap_or(trimmed_start.len());
     let first_token = &trimmed_start[..first_token_end];
 
-    if matches!(first_token, "!" | "!!" | "?" | "OK") {
+    let marker_style = if matches!(first_token, "!" | "!!" | "?" | "OK") {
+        Some(Style::new().fg(COLOR_MARKER))
+    } else if first_token.eq_ignore_ascii_case("skip") {
+        Some(Style::new().fg(Color::DarkGray))
+    } else {
+        None
+    };
+
+    if let Some(style) = marker_style {
         segments.push(StatusSegment {
             text: first_token.to_string(),
-            style: Some(Style::new().fg(COLOR_MARKER)),
+            style: Some(style),
         });
         let rest = &trimmed_start[first_token_end..];
         if !rest.is_empty() {
