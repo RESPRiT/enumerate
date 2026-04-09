@@ -83,17 +83,19 @@ The agent writes these parts using the item's `fields` as source material:
 
 1. **Context** (unlabeled): prose immediately after the scaffold. Summarizes what the case is about — current state, constraints, what's at stake. The user reads this before seeing your opinion.
 2. **Recommendation:** (labeled `**Recommendation:**`): your pick. For `?` items, replace with unlabeled explanation prose — the user needs to understand the proposal before deciding.
-3. **Ask:** (labeled `**Ask:**`): the concrete question. When multiple alternatives exist, label them inline as `(a)`, `(b)`, etc. with inline-code wrapping for color. `(!)` = "something else" (open-ended). `(?)` = "tell me more / discuss further." Write choices as flowing prose, not an itemized list: ``**Ask:** `(a)` Do X, or `(b)` do Y? `(!)` Something else``
+3. **Ask:** (labeled `**Ask:**`): the concrete question. When multiple alternatives exist, label them inline as `(a)`, `(b)`, etc. with inline-code wrapping for color. `(*)` = "something else" (open-ended escape hatch — include whenever "other" is a reasonable response). `(?)` = "tell me more / discuss further." Write choices as flowing prose, not an itemized list: ``**Ask:** `(a)` Do X, or `(b)` do Y? `(*)` Something else``
+4. **`?` items still get structured choices.** After the unlabeled explanation, the Ask should offer concrete alternatives — typically `(a)` accept the proposal as explained, `(b)` skip/decline, `(?)` tell me more.
 
 ### Behavioral rules
 
-1. **One item per message.** Each agent turn walks exactly one case. The first turn includes the orientation header + scaffold + prose. Subsequent turns include the scaffold + prose.
-2. **Confirmation on resolve.** When the user gives a decision, confirm with: the case header (badge + `#N` + name), then `Noted — [summary of decision]. Moving on.` on the next line. Then the next item's scaffold + prose follow. If it's the last item, the confirmation precedes the summary table instead.
-3. **Length** is ≤10 lines typical, not strict — going under is fine, going over should be rare.
-4. **One decision per step.** Never bundle nested sub-questions; if discovered, defer them as new cases.
-5. **No trailing open questions** or "things to consider later." End each step with a single concrete ask.
-6. **Defer discovered sub-cases.** If a case spawns new sub-cases mid-walk, note them for a follow-up enumeration after the walk completes. Do not expand the current step.
-7. **Track derivations.** When one decision constrains a later case, note the dependency in your reasoning ("this follows from #4b"). Don't ask for redundant ratifications.
+1. **No extra separators.** Do not add `---` or other visual breaks between cases — the scaffold's divider handles all visual separation.
+2. **One item per message.** Each agent turn walks exactly one case. The first turn includes the orientation header + scaffold + prose. Subsequent turns include the scaffold + prose.
+3. **Confirmation on resolve.** When the user gives a decision, confirm with: the case header (badge + `#N` + name), then `Noted — [summary of decision]. Moving on.` on the next line. Then the next item's scaffold + prose follow. If it's the last item, the confirmation precedes the summary table instead.
+4. **Length** is ≤10 lines typical, not strict — going under is fine, going over should be rare.
+5. **One decision per step.** Never bundle nested sub-questions; if discovered, defer them as new cases.
+6. **No trailing open questions** or "things to consider later." End each step with a single concrete ask.
+7. **Defer discovered sub-cases.** If a case spawns new sub-cases mid-walk, note them for a follow-up enumeration after the walk completes. Do not expand the current step.
+8. **Track derivations.** When one decision constrains a later case, note the dependency in your reasoning ("this follows from #4b"). Don't ask for redundant ratifications.
 
 ## Enumeration discipline
 
