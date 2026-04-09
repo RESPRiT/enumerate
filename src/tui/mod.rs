@@ -2,28 +2,79 @@ pub mod state;
 pub mod view;
 
 use std::path::Path;
+use std::process::Command;
 use std::time::Duration;
 
+use ansi_to_tui::IntoText;
 use anyhow::{Context, Result};
 use ratatui::DefaultTerminal;
 use ratatui::crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
+use ratatui::style::{Color, Style};
+use ratatui::text::Text;
 
 use crate::doc::{self, LoadResult};
 use crate::gitignore;
 
-pub fn run(file: &Path) -> Result<()> {
+/// Foreground color used for the dimmed backdrop. We deliberately drop the
+/// captured pane's original colors and replace them with this uniform value
+/// because `Modifier::DIM` is widely unsupported (and subtle even where it
+/// works), while a flat dark-gray fg gives a strong, consistent recede on
+/// every terminal.
+const BACKDROP_COLOR: Color = Color::DarkGray;
+
+pub fn run(file: &Path, backdrop_pane: Option<&str>) -> Result<()> {
     let input = std::fs::read_to_string(file)
         .with_context(|| format!("failed to read {}", file.display()))?;
     let LoadResult { doc, warnings } = doc::parse(&input)?;
 
     let _ = gitignore::ensure_enumerate_ignored(file);
 
-    let mut app = state::App::new(file.to_path_buf(), doc, warnings);
+    // Capture the source pane before we take over the terminal. If capture
+    // fails for any reason, fall back to no backdrop rather than aborting —
+    // the TUI is still useful without it.
+    let backdrop = backdrop_pane.and_then(|pane_id| {
+        let mut text = capture_pane(pane_id).ok()?;
+        dim_in_place(&mut text);
+        Some(text)
+    });
+
+    let mut app = state::App::new(file.to_path_buf(), doc, warnings, backdrop);
 
     let mut terminal = ratatui::init();
     let result = run_loop(&mut terminal, &mut app);
     ratatui::restore();
     result
+}
+
+fn capture_pane(pane_id: &str) -> Result<Text<'static>> {
+    let output = Command::new("tmux")
+        .args(["capture-pane", "-p", "-e", "-J", "-t", pane_id])
+        .output()
+        .context("failed to invoke `tmux capture-pane`")?;
+    if !output.status.success() {
+        anyhow::bail!(
+            "`tmux capture-pane` failed: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        );
+    }
+    output
+        .stdout
+        .into_text()
+        .context("failed to parse captured pane as ANSI text")
+}
+
+/// Strip the captured pane's per-span colors and modifiers and replace every
+/// span with a uniform dim foreground. Mutates in place to avoid reallocating
+/// the (potentially large) span tree.
+fn dim_in_place(text: &mut Text<'static>) {
+    let dim = Style::new().fg(BACKDROP_COLOR);
+    text.style = Style::default();
+    for line in &mut text.lines {
+        line.style = Style::default();
+        for span in &mut line.spans {
+            span.style = dim;
+        }
+    }
 }
 
 fn run_loop(terminal: &mut DefaultTerminal, app: &mut state::App) -> Result<()> {

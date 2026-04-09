@@ -3,11 +3,14 @@ use ratatui::buffer::Buffer;
 use ratatui::layout::{Alignment, Constraint, Layout, Position, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span, Text};
-use ratatui::widgets::{Block, BorderType, Borders, Padding, Paragraph, Widget, Wrap};
+use ratatui::widgets::{Block, BorderType, Borders, Clear, Padding, Paragraph, Widget, Wrap};
 
 use crate::doc::{Case, Doc, Group, DECISION_COLUMN};
 
 use super::state::App;
+
+const OVERLAY_PERCENT_X: u16 = 90;
+const OVERLAY_PERCENT_Y: u16 = 90;
 
 const NUM_COL_WIDTH: u16 = 12;
 const STATUS_COL_WIDTH: u16 = 15;
@@ -22,8 +25,26 @@ const COLOR_HEADER: Color = Color::Yellow;
 const COLOR_MARKER: Color = Color::Rgb(255, 230, 80);
 
 pub fn render(frame: &mut Frame, app: &mut App) {
-    let area = frame.area();
+    let frame_area = frame.area();
 
+    // If we have a captured backdrop (--popup mode), draw it across the full
+    // frame (already dimmed at capture time in tui::run), then carve out a
+    // centered overlay for the dialog. Otherwise the dialog takes the whole
+    // frame.
+    let dialog_area = if let Some(backdrop) = app.backdrop.clone() {
+        frame.render_widget(Paragraph::new(backdrop), frame_area);
+
+        let overlay = centered_rect(frame_area, OVERLAY_PERCENT_X, OVERLAY_PERCENT_Y);
+        frame.render_widget(Clear, overlay);
+        overlay
+    } else {
+        frame_area
+    };
+
+    render_dialog(frame, app, dialog_area);
+}
+
+fn render_dialog(frame: &mut Frame, app: &mut App, area: Rect) {
     let outer = Block::bordered()
         .border_type(BorderType::Thick)
         .padding(Padding::new(2, 2, 1, 1));
@@ -40,6 +61,22 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     render_header(frame, header_area, app);
     render_footer(frame, footer_area);
     render_body(frame, body_area, app);
+}
+
+fn centered_rect(area: Rect, percent_x: u16, percent_y: u16) -> Rect {
+    let vertical = Layout::vertical([
+        Constraint::Percentage((100 - percent_y) / 2),
+        Constraint::Percentage(percent_y),
+        Constraint::Percentage((100 - percent_y) / 2),
+    ])
+    .split(area);
+
+    Layout::horizontal([
+        Constraint::Percentage((100 - percent_x) / 2),
+        Constraint::Percentage(percent_x),
+        Constraint::Percentage((100 - percent_x) / 2),
+    ])
+    .split(vertical[1])[1]
 }
 
 fn render_header(frame: &mut Frame, area: Rect, app: &App) {

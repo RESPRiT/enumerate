@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 
 use anyhow::Result;
+use ratatui::text::Text;
 
 use crate::doc::{Doc, DECISION_COLUMN, Warning};
 
@@ -28,11 +29,20 @@ pub struct App {
     pub scroll: u16,
     pub quit: bool,
     pub dirty: bool,
+    /// Optional captured snapshot of another tmux pane to render as a dimmed
+    /// backdrop behind the dialog. `None` for plain in-terminal / `--window`
+    /// modes; `Some` only when launched with `--backdrop-pane`.
+    pub backdrop: Option<Text<'static>>,
     undo_stack: Vec<UndoEntry>,
 }
 
 impl App {
-    pub fn new(file_path: PathBuf, doc: Doc, warnings: Vec<Warning>) -> Self {
+    pub fn new(
+        file_path: PathBuf,
+        doc: Doc,
+        warnings: Vec<Warning>,
+        backdrop: Option<Text<'static>>,
+    ) -> Self {
         let mut selectable = Vec::new();
         for (gi, group) in doc.groups.iter().enumerate() {
             for ci in 0..group.cases.len() {
@@ -49,6 +59,7 @@ impl App {
             scroll: 0,
             quit: false,
             dirty: false,
+            backdrop,
             undo_stack: Vec::new(),
         };
         app.reset_input_cursor();

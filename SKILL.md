@@ -135,8 +135,8 @@ Format rules:
 
 Check whether you're inside tmux by inspecting `$TMUX` (e.g., `echo "${TMUX:-no}"` via Bash):
 
-- **Inside tmux ($TMUX is set):** run `enumerate <path> --window` via Bash. The binary spawns a new tmux window running the TUI and blocks until that window closes. When it returns, re-read the file in the same turn and proceed to step 4.
-- **Outside tmux ($TMUX is unset):** do **not** invoke the binary yourself — `--window` errors out non-zero outside tmux, and running it without the flag would take over the agent's terminal. Instead, end your turn and tell the user to run `enumerate <path>` themselves, then reply when they're done. Re-read the file in the next turn and proceed to step 4.
+- **Inside tmux ($TMUX is set):** run `enumerate <path> --popup` via Bash. The binary captures the current pane as a dimmed backdrop, spawns a new tmux window running the TUI as a centered overlay, and blocks until that window closes. When it returns, re-read the file in the same turn and proceed to step 4.
+- **Outside tmux ($TMUX is unset):** do **not** invoke the binary yourself — `--popup` errors out non-zero outside tmux, and running it without the flag would take over the agent's terminal. Instead, end your turn and tell the user to run `enumerate <path>` themselves, then reply when they're done. Re-read the file in the next turn and proceed to step 4.
 
 This step is **always** run after writing the doc. There is no condition under which the TUI step is skipped or replaced with another invocation.
 

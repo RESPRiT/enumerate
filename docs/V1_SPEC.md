@@ -31,11 +31,13 @@ Single positional argument plus two mutually exclusive launch flags:
 |---|---|
 | `enumerate <file>` | Launches the TUI in the current terminal, blocking until quit. Default for manual use. |
 | `enumerate <file> --window` | Spawns the TUI in a new tmux window via `tmux new-window -n enumerate -P -F '#{window_id}'`, then blocks (polling `tmux list-windows` every 100ms) until that window closes. Errors non-zero outside tmux. |
-| `enumerate <file> --popup` | *(planned)* Pseudo-modal: captures the current pane via `tmux capture-pane -e` and renders the snapshot as a dimmed backdrop behind the TUI in a new window. Same `new-window` + poll mechanism as `--window`. Errors non-zero outside tmux. |
+| `enumerate <file> --popup` | Pseudo-modal: reads `$TMUX_PANE`, then relaunches in a new tmux window with a hidden `--backdrop-pane <id>` flag. The new TUI shells out to `tmux capture-pane -p -e -J -t <id>`, parses the result with `ansi-to-tui`, and renders it dimmed across the full frame with the dialog overlaid as a centered 90% × 90% rect. Same `new-window` + poll mechanism as `--window`. Errors non-zero outside tmux. |
 
-The agent calls `enumerate <file> --window` from inside tmux and falls back to plain `enumerate <file>` (run by the user) when `$TMUX` is unset. The skill performs the tmux check itself; the binary does not silently fall back.
+The agent calls `enumerate <file> --popup` from inside tmux and falls back to plain `enumerate <file>` (run by the user) when `$TMUX` is unset. The skill performs the tmux check itself; the binary does not silently fall back.
 
-Why `new-window` instead of `display-popup`: tmux popups are modal — they capture all keys (including the prefix) and don't reflow on terminal resize. A real window gets full prefix-key handling and auto-resizes for free.
+Why `new-window` instead of `display-popup`: tmux popups are modal — they capture all keys (including the prefix) and don't reflow on terminal resize. A real window gets full prefix-key handling and auto-resizes for free. The `--popup` snapshot backdrop preserves the visual continuity of the old `display-popup` flow while keeping all the affordances of a real window.
+
+The snapshot is captured **once** at launch and held static for the lifetime of the TUI. The source pane is frozen anyway because the parent `enumerate --popup` process is blocked, so re-capture on resize would not buy anything for v1; the rendered backdrop simply clips to the new size on resize.
 
 ## Storage format
 
@@ -174,8 +176,8 @@ struct Warning {
 The `enumerate` skill is rewritten to:
 
 1. **Enumerate.** Pick one of the named templates (`default (revision)`, `exhaustiveness/coverage`, `design/ideation`, `task completion`, or `custom`) based on the topic, and write a section-per-case markdown file at `./.enumerate/<YYYY-MM-DD>-<topic-slug>.md`. Templates contain only **content columns** — they do *not* include the Decision column.
-2. **Open the TUI.** Inside tmux, run `enumerate <path> --window` via Bash; the binary spawns a new tmux window running the TUI and blocks until the user closes that window. The Decision column is appended on load.
-3. **Wait** (out-of-tmux only). `--window` errors outside tmux, so the skill checks `$TMUX` itself. When unset: end the turn, ask the user to run `enumerate <path>` and reply when done.
+2. **Open the TUI.** Inside tmux, run `enumerate <path> --popup` via Bash; the binary captures the current pane, spawns a new tmux window with the TUI overlaid on the dimmed snapshot, and blocks until the user closes that window. The Decision column is appended on load.
+3. **Wait** (out-of-tmux only). `--popup` errors outside tmux, so the skill checks `$TMUX` itself. When unset: end the turn, ask the user to run `enumerate <path>` and reply when done.
 4. **Walk.** Re-read the file. Process items one at a time in priority order driven by Decision markers (`!! > ! > ? > OK`). One item, one decision.
 5. **Summarize and implement.** Same as the current skill.
 

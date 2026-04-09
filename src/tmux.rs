@@ -15,9 +15,44 @@ const POLL_INTERVAL: Duration = Duration::from_millis(100);
 /// work) instead of a modal `display-popup`.
 pub fn window(file: &Path) -> Result<()> {
     require_tmux()?;
+    let inner = build_inner_command(file, None)?;
+    spawn_and_wait(&inner)
+}
 
-    let inner = build_inner_command(file)?;
+/// Pseudo-modal: capture the current pane via `tmux capture-pane` and relaunch
+/// the TUI in a new window with `--backdrop-pane <id>`, so the TUI renders the
+/// snapshot dimmed behind a centered overlay. Same `new-window` + poll
+/// mechanism as [`window`]; differs only in the inner command.
+pub fn popup(file: &Path) -> Result<()> {
+    require_tmux()?;
+    let pane_id = env::var("TMUX_PANE")
+        .context("$TMUX_PANE is not set; cannot capture source pane for --popup")?;
+    let inner = build_inner_command(file, Some(&pane_id))?;
+    spawn_and_wait(&inner)
+}
 
+fn require_tmux() -> Result<()> {
+    if env::var_os("TMUX").is_none() {
+        bail!("not inside tmux: --window and --popup require an active tmux session");
+    }
+    Ok(())
+}
+
+fn build_inner_command(file: &Path, backdrop_pane: Option<&str>) -> Result<String> {
+    let current_exe = env::current_exe().context("could not determine current binary path")?;
+    let mut cmd = format!(
+        "{} {}",
+        shell_quote(&current_exe.to_string_lossy()),
+        shell_quote(&file.to_string_lossy()),
+    );
+    if let Some(pane) = backdrop_pane {
+        cmd.push_str(" --backdrop-pane ");
+        cmd.push_str(&shell_quote(pane));
+    }
+    Ok(cmd)
+}
+
+fn spawn_and_wait(inner: &str) -> Result<()> {
     // Spawn the TUI in a new window and capture its window id so we can poll
     // for closure regardless of which session/window the user navigates to.
     let output = Command::new("tmux")
@@ -28,7 +63,7 @@ pub fn window(file: &Path) -> Result<()> {
             "#{window_id}",
             "-n",
             "enumerate",
-            &inner,
+            inner,
         ])
         .output()
         .context("failed to spawn `tmux new-window`")?;
@@ -47,30 +82,6 @@ pub fn window(file: &Path) -> Result<()> {
     }
 
     wait_for_window_close(&window_id)
-}
-
-/// Pseudo-modal: capture the current pane and render it as a backdrop behind
-/// the TUI in a new window. Not yet implemented — see locked-in decisions 6–10
-/// in the design notes.
-#[allow(dead_code)]
-pub fn popup(_file: &Path) -> Result<()> {
-    bail!("--popup is not implemented yet; use --window")
-}
-
-fn require_tmux() -> Result<()> {
-    if env::var_os("TMUX").is_none() {
-        bail!("not inside tmux: --window and --popup require an active tmux session");
-    }
-    Ok(())
-}
-
-fn build_inner_command(file: &Path) -> Result<String> {
-    let current_exe = env::current_exe().context("could not determine current binary path")?;
-    Ok(format!(
-        "{} {}",
-        shell_quote(&current_exe.to_string_lossy()),
-        shell_quote(&file.to_string_lossy()),
-    ))
 }
 
 fn wait_for_window_close(window_id: &str) -> Result<()> {

@@ -4,7 +4,7 @@ A Rust TUI + Claude Code skill for **atomizing decision-making**. When you're st
 
 The repo ships two pieces that work together:
 
-1. **`enumerate` binary** — a Rust TUI (ratatui + crossterm) that opens an enumeration doc in a tmux window alongside Claude Code. You annotate each case in a `Decision` column; the file on disk stays the source of truth.
+1. **`enumerate` binary** — a Rust TUI (ratatui + crossterm) that opens an enumeration doc in a new tmux window, overlaid on a dimmed snapshot of your Claude Code pane. You annotate each case in a `Decision` column; the file on disk stays the source of truth.
 2. **`SKILL.md`** — the `/enumerate` Claude Code skill that orchestrates the round-trip: it picks a template, enumerates the design space, opens the TUI, and walks you through your marked items one by one.
 
 ## How it works
@@ -17,10 +17,11 @@ The repo ships two pieces that work together:
   writes ./.enumerate/<YYYY-MM-DD>-<topic-slug>.md
         │
         ▼
-  Claude runs `enumerate <path> --window`
+  Claude runs `enumerate <path> --popup`
         │
         ▼
-  TUI opens in a new tmux window alongside Claude Code
+  TUI opens in a new tmux window, overlaid on a
+  dimmed snapshot of your Claude Code pane
   → you mark each case with !! / ! / ? / OK
   → autosaves on every keystroke
   → close the window when done
@@ -84,7 +85,7 @@ Restart Claude Code (or start a new session) and `/enumerate` should be availabl
 /enumerate the auth middleware rewrite
 ```
 
-Claude will explore the topic, write `./.enumerate/2026-04-08-auth-middleware-rewrite.md` (date-prefixed for chronological sorting), open it in a new tmux window, and then walk you through your marked items once you close the window.
+Claude will explore the topic, write `./.enumerate/2026-04-08-auth-middleware-rewrite.md` (date-prefixed for chronological sorting), open it in a new tmux window with the chat snapshot dimmed behind it, and then walk you through your marked items once you close the window.
 
 ### Standalone
 
@@ -93,9 +94,10 @@ You can also point the binary at any conformant doc:
 ```sh
 enumerate ./docs/sample.md            # full-screen TUI in the current terminal
 enumerate ./docs/sample.md --window   # spawn the TUI in a new tmux window (requires $TMUX)
+enumerate ./docs/sample.md --popup    # same, with the current pane captured as a dimmed backdrop
 ```
 
-`--window` is what the skill calls from inside tmux. It blocks until the user closes the window. Outside tmux the flag errors out — the skill detects `$TMUX` itself and falls back to instructing the user to run plain `enumerate <path>` manually.
+`--popup` is what the skill calls from inside tmux. It captures the current pane via `tmux capture-pane`, spawns a new window, and the TUI renders the snapshot dimmed behind a centered overlay. Both `--window` and `--popup` block until the user closes the window. Outside tmux they error out — the skill detects `$TMUX` itself and falls back to instructing the user to run plain `enumerate <path>` manually.
 
 ## Doc format
 
