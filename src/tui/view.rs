@@ -138,7 +138,7 @@ fn render_body(frame: &mut Frame, area: Rect, app: &mut App) {
         return;
     }
 
-    let plan = compute_layout(&app.doc, area.width, app.selected_case());
+    let plan = compute_layout(&app.doc, area.width, app.selected_case(), app.input_cursor);
 
     let expand_extra = plan.expanded.as_ref()
         .map(|e| e.height.saturating_sub(plan.groups[e.group_idx].row_height))
@@ -173,6 +173,9 @@ fn render_body(frame: &mut Frame, area: Rect, app: &mut App) {
             let prefix = &value[..app.input_cursor.min(value.len())];
             let cursor_line = if inner_w == 0 || prefix.is_empty() {
                 0
+            } else if app.input_cursor >= value.len() {
+                // Cursor is past the end — the █ block is an extra char.
+                wrap_height_with_cursor(prefix, inner_w).saturating_sub(1)
             } else {
                 wrap_height(prefix, inner_w).saturating_sub(1)
             };
@@ -254,7 +257,7 @@ struct CursorRect {
     bottom: u16,
 }
 
-fn compute_layout(doc: &Doc, width: u16, selection: Option<(usize, usize)>) -> LayoutPlan {
+fn compute_layout(doc: &Doc, width: u16, selection: Option<(usize, usize)>, input_cursor: usize) -> LayoutPlan {
     let mut y = 0u16;
     let mut positions = Vec::new();
     let mut groups = Vec::new();
@@ -291,7 +294,18 @@ fn compute_layout(doc: &Doc, width: u16, selection: Option<(usize, usize)>) -> L
             positions.push(CursorRect { top, bottom });
 
             if selection == Some((gi, ci)) {
-                let natural_h = compute_case_row_height(case, &doc.frontmatter.columns, &column_widths);
+                let mut natural_h = compute_case_row_height(case, &doc.frontmatter.columns, &column_widths);
+                // The █ cursor block at the end of the Decision field is an
+                // extra character that can wrap to a new line.
+                let decision = case.fields.get(DECISION_COLUMN).map(String::as_str).unwrap_or("");
+                if input_cursor >= decision.len() {
+                    let col_idx = doc.frontmatter.columns.iter()
+                        .position(|c| c.eq_ignore_ascii_case(DECISION_COLUMN))
+                        .unwrap_or(0);
+                    let inner_w = column_widths[col_idx + 1].saturating_sub(2);
+                    let cursor_h = wrap_height_with_cursor(decision, inner_w) + 2;
+                    natural_h = natural_h.max(cursor_h);
+                }
                 if natural_h > row_height {
                     expanded = Some(ExpandedRow {
                         group_idx: gi,
@@ -437,6 +451,46 @@ fn wrap_line_count(line: &str, width: usize) -> u16 {
     }
 
     lines
+}
+
+/// Like `wrap_height` but adds one character for the █ cursor block at the
+/// end of the text, which can push to a new wrapped line.
+fn wrap_height_with_cursor(text: &str, width: u16) -> u16 {
+    if width == 0 {
+        return 1;
+    }
+    let w = width as usize;
+    let base = wrap_height(text, width);
+    // Check if the last wrapped line is full — if so the cursor wraps.
+    let last_line_col = last_col(text, w);
+    if last_line_col >= w { base + 1 } else { base }
+}
+
+/// Return the column position at the end of the last wrapped line.
+fn last_col(text: &str, width: usize) -> usize {
+    let mut col = 0usize;
+    for line in text.lines() {
+        col = 0;
+        for word in line.split(' ') {
+            let wlen = word.chars().count();
+            if col == 0 {
+                if wlen <= width {
+                    col = wlen;
+                } else {
+                    col = wlen - ((wlen - 1) / width) * width;
+                }
+            } else if col + 1 + wlen <= width {
+                col += 1 + wlen;
+            } else {
+                if wlen <= width {
+                    col = wlen;
+                } else {
+                    col = wlen - ((wlen - 1) / width) * width;
+                }
+            }
+        }
+    }
+    col
 }
 
 fn render_to_tall_buffer(buf: &mut Buffer, app: &App, plan: &LayoutPlan) {
