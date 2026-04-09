@@ -1,14 +1,18 @@
 use std::path::PathBuf;
 
 use anyhow::Result;
-use clap::Parser;
-use enumerate::{tmux, tui};
+use clap::{Parser, Subcommand};
+use enumerate::{tmux, tui, walk};
 
 #[derive(Parser)]
 #[command(name = "enumerate", about = "TUI for enumerate decision docs")]
 struct Cli {
-    /// Path to the decision document
-    file: PathBuf,
+    #[command(subcommand)]
+    command: Option<Command>,
+
+    /// Path to the decision document (when not using a subcommand)
+    #[arg(global = false)]
+    file: Option<PathBuf>,
 
     /// Spawn the TUI in a new tmux window (requires $TMUX)
     #[arg(long, conflicts_with_all = ["popup", "backdrop_pane"])]
@@ -25,13 +29,29 @@ struct Cli {
     backdrop_pane: Option<String>,
 }
 
+#[derive(Subcommand)]
+enum Command {
+    /// Output walk scaffolding as YAML for the agent to consume
+    Walk {
+        /// Path to the decision document
+        file: PathBuf,
+    },
+}
+
 fn main() -> Result<()> {
     let cli = Cli::parse();
+
+    if let Some(Command::Walk { file }) = cli.command {
+        return walk::run(&file);
+    }
+
+    let file = cli.file.expect("file argument required when not using a subcommand");
+
     if cli.window {
-        tmux::window(&cli.file)
+        tmux::window(&file)
     } else if cli.popup {
-        tmux::popup(&cli.file)
+        tmux::popup(&file)
     } else {
-        tui::run(&cli.file, cli.backdrop_pane.as_deref())
+        tui::run(&file, cli.backdrop_pane.as_deref())
     }
 }

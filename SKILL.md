@@ -45,16 +45,16 @@ This step is **always** run after writing the doc. There is no condition under w
 
 ### 4. Walk the list
 
-Read the file. Process Decision markers in priority order:
+Run `enumerate walk <path>` via Bash. The binary reads the file, sorts items by marker priority (`!!` > `!` > `?`, skips `OK`), and outputs YAML with two top-level keys:
 
-1. `!!` items first (must discuss)
-2. `!` items next (should discuss)
-3. `?` items last (explain the proposal first, then ask)
-4. Skip `OK` items (already agreed)
+- `orientation` — pre-rendered markdown for the orientation header. Echo verbatim as the first line of the walk.
+- `items` — array of walked cases, each with:
+  - `scaffold` — pre-rendered markdown block (divider + counter + case header + quoted note if present). Echo verbatim at the top of each walk step.
+  - `fields` — map of the case's content columns as raw text. Use these as source material to write context, recommendation, and ask. Do not echo them verbatim.
+
+The agent never constructs dividers, counters, case headers, or quoted notes itself — it echoes the scaffold and writes only the prose (context, recommendation, ask). Walk-step output is constrained by the **Walk discipline** section below.
 
 For `?` items, lead with clarification — the user marked them because they don't understand the proposal yet. Explain, then ask.
-
-The TUI is browse-mode; the walk happens here in chat, driven by you. Walk-step output is constrained by the **Walk discipline** section below.
 
 ### 5. Summarize decisions
 
@@ -64,30 +64,36 @@ After all items are resolved, present a summary table of decisions made. One row
 
 After the summary (not during the walk), update all resolved Decision markers in the enumeration doc in a single batch edit. Do not edit the doc once per decision — wait until the walk is complete and apply all changes at once.
 
-### 7. Implement
-
-If the decisions lead to code changes, implement them as you would any other coding task. After implementing, link test names to each case in the doc where applicable — that's the one piece of post-walk work that's specific to `/enumerate`.
-
 ## Walk discipline
 
 How to write each walk step:
 
-1. **Shape**: marker badge → case header → quoted note → recommendation → why → ask. In that order, every step. For `?` items (user needs clarification), replace recommendation+why with a plain explanation, then ask.
-2. **Labels**: `**Recommendation:**`, `**Why:**`, `**Ask:**`. For `?` items, the explanation has no label — just prose between the quoted note and the **Ask:** line.
-3. **Case header**: `` `(!!)` **#N Case name** `` — inline-code-wrapped marker badge (one of `(!!)`, `(!)`, `(?)`) followed by bold `#N` and name. No H3 — bold text only.
-4. **Quoted note**: `> Your note: *user's commentary*` — strip the marker prefix from the quote (it's already in the badge). Italicize the note text.
-5. **Divider + counter** between consecutive walk steps (not before the first step). Two-line block, both inline-code-wrapped:
-   - Line 1: 60 `━` characters (U+2501 heavy horizontal)
-   - Line 2: right-aligned `[N of M]` counter, padded with leading spaces so its right edge aligns with column 60 (i.e., 60 minus the length of the counter string)
-   - No blank line between the divider and the next case header — they sit flush.
-6. **Orientation header**: first line of the walk, before the first case: `**Walking N items:** ` `` `!!` `` ` × A, ` `` `!` `` ` × B, ` `` `?` `` ` × C.` — tallies by marker type.
-7. **One item per message.** Each agent turn walks exactly one case. The divider+counter appears at the top of every turn except the first.
-8. **Confirmation on resolve.** When the user gives a decision, confirm with: the case header (badge + `#N` + name), then `Noted — [summary of decision]. Moving on.` on the next line. Then the divider+counter and next case follow. If it's the last item, the confirmation precedes the summary table instead.
-9. **Length** is ≤10 lines typical, not strict — going under is fine, going over should be rare.
-10. **One decision per step.** Never bundle nested sub-questions; if discovered, defer them as new cases.
-11. **No trailing open questions** or "things to consider later." End each step with a single concrete ask.
-12. **Defer discovered sub-cases.** If a case spawns new sub-cases mid-walk, note them for a follow-up enumeration after the walk completes. Do not expand the current step.
-13. **Track derivations.** When one decision constrains a later case, note the dependency in your reasoning ("this follows from #4b"). Don't ask for redundant ratifications.
+### Scaffold (echoed from binary)
+
+The `enumerate walk` output provides pre-rendered markdown for all mechanical parts. The agent echoes these verbatim and never constructs them itself:
+
+- **Orientation header**: echoed from `orientation`. Tallies walked items by marker type using inline-code-wrapped badge format: `` `(!!)` × N ``.
+- **Divider + counter**: echoed from each item's `scaffold`. Two inline-code-wrapped lines: 60 `━` (U+2501) on line 1, right-aligned `[N of M]` on line 2. Appears on every step including the first.
+- **Case header**: included in `scaffold`. Inline-code-wrapped marker badge + bold `#N` and name. No H3.
+- **Quoted note**: included in `scaffold` when the user wrote commentary beyond the bare marker. Omitted for bare markers.
+
+### Agent-written prose
+
+The agent writes these parts using the item's `fields` as source material:
+
+1. **Context** (unlabeled): prose immediately after the scaffold. Summarizes what the case is about — current state, constraints, what's at stake. The user reads this before seeing your opinion.
+2. **Recommendation:** (labeled `**Recommendation:**`): your pick. For `?` items, replace with unlabeled explanation prose — the user needs to understand the proposal before deciding.
+3. **Ask:** (labeled `**Ask:**`): the concrete question. When multiple alternatives exist, label them inline as `(a)`, `(b)`, etc. with inline-code wrapping for color. `(!)` = "something else" (open-ended). `(?)` = "tell me more / discuss further." Write choices as flowing prose, not an itemized list: ``**Ask:** `(a)` Do X, or `(b)` do Y? `(!)` Something else``
+
+### Behavioral rules
+
+1. **One item per message.** Each agent turn walks exactly one case. The first turn includes the orientation header + scaffold + prose. Subsequent turns include the scaffold + prose.
+2. **Confirmation on resolve.** When the user gives a decision, confirm with: the case header (badge + `#N` + name), then `Noted — [summary of decision]. Moving on.` on the next line. Then the next item's scaffold + prose follow. If it's the last item, the confirmation precedes the summary table instead.
+3. **Length** is ≤10 lines typical, not strict — going under is fine, going over should be rare.
+4. **One decision per step.** Never bundle nested sub-questions; if discovered, defer them as new cases.
+5. **No trailing open questions** or "things to consider later." End each step with a single concrete ask.
+6. **Defer discovered sub-cases.** If a case spawns new sub-cases mid-walk, note them for a follow-up enumeration after the walk completes. Do not expand the current step.
+7. **Track derivations.** When one decision constrains a later case, note the dependency in your reasoning ("this follows from #4b"). Don't ask for redundant ratifications.
 
 ## Enumeration discipline
 
