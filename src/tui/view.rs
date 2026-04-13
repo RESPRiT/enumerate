@@ -12,8 +12,8 @@ use super::state::App;
 const OVERLAY_PERCENT_X: u16 = 90;
 const OVERLAY_PERCENT_Y: u16 = 90;
 
-const NUM_COL_WIDTH: u16 = 12;
-const STATUS_COL_WIDTH: u16 = 15;
+const NUM_COL_WIDTH: u16 = 16;
+const STATUS_COL_WIDTH: u16 = 20;
 const SUBMIT_WIDTH: u16 = 30;
 const SUBMIT_HEIGHT: u16 = 3;
 const MAX_TEXT_LINES: u16 = 3;
@@ -153,9 +153,14 @@ fn render_body(frame: &mut Frame, area: Rect, app: &mut App) {
         let need_top = pos.top;
         let mut need_bottom = pos.bottom;
 
-        // When expanded, extend the scroll target to include the input
-        // cursor's actual y-position within the expanded Decision cell.
+        // When expanded, extend the scroll target to include the full
+        // expansion height + the input cursor position, plus a small
+        // padding so the expansion doesn't press against the viewport edge.
         if let Some(ref expanded) = plan.expanded {
+            // Include full expansion height.
+            need_bottom = need_bottom.max(expanded.y + expanded.height + 2);
+
+            // Also track the input cursor within the Decision cell.
             let (gi, ci) = (expanded.group_idx, expanded.case_idx);
             let value = app.doc.groups[gi].cases[ci]
                 .fields
@@ -180,11 +185,11 @@ fn render_body(frame: &mut Frame, area: Rect, app: &mut App) {
                 wrap_height(prefix, inner_w).saturating_sub(1)
             };
             let cursor_y = expanded.y + 1 + cursor_line;
-            need_bottom = need_bottom.max(cursor_y + 1);
+            need_bottom = need_bottom.max(cursor_y + 3);
         }
 
         let range = need_bottom.saturating_sub(need_top);
-        let eighth = area.height / 8;
+        let twelfth = area.height / 12;
 
         if range > area.height {
             // Target taller than viewport — keep cursor visible, sacrifice top.
@@ -193,11 +198,11 @@ fn render_body(frame: &mut Frame, area: Rect, app: &mut App) {
             // Off-screen — center.
             let mid = (need_top + need_bottom) / 2;
             app.scroll = mid.saturating_sub(area.height / 2);
-        } else if need_top < app.scroll + eighth && app.scroll > 0 {
+        } else if need_top < app.scroll + twelfth && app.scroll > 0 {
             // Upper eighth — center.
             let mid = (need_top + need_bottom) / 2;
             app.scroll = mid.saturating_sub(area.height / 2);
-        } else if need_bottom > app.scroll + area.height.saturating_sub(eighth) {
+        } else if need_bottom > app.scroll + area.height.saturating_sub(twelfth) {
             // Lower eighth — center.
             let mid = (need_top + need_bottom) / 2;
             app.scroll = mid.saturating_sub(area.height / 2);
@@ -349,12 +354,18 @@ fn compute_layout(doc: &Doc, width: u16, selection: Option<(usize, usize)>, inpu
 fn compute_column_widths(table_width: u16, columns: &[String]) -> Vec<u16> {
     let inner_width = table_width.saturating_sub(2); // outer table borders
 
+    // The first non-Decision column (typically Description) gets a larger
+    // share of the remaining space than subsequent columns (e.g. Notes).
+    let mut first_fill = true;
     let constraints: Vec<Constraint> = std::iter::once(Constraint::Length(NUM_COL_WIDTH))
         .chain(columns.iter().map(|c| {
             if c.eq_ignore_ascii_case(DECISION_COLUMN) {
                 Constraint::Length(STATUS_COL_WIDTH)
+            } else if first_fill {
+                first_fill = false;
+                Constraint::Fill(3)
             } else {
-                Constraint::Fill(1)
+                Constraint::Fill(2)
             }
         }))
         .collect();
@@ -528,35 +539,131 @@ fn render_to_tall_buffer(buf: &mut Buffer, app: &App, plan: &LayoutPlan) {
         render_table(buf, layout.table_y, width, group, gi, &app.doc.frontmatter.columns, layout, selection);
     }
 
-    // Expanded row overlay: re-render the selected row at full height on top.
+    // Expanded row overlay: re-render only columns whose content exceeds
+    // the capped height. Columns that fit stay at their initial render so
+    // they don't blank out rows below in unrelated columns.
     if let Some(ref expanded) = plan.expanded {
         let group = &app.doc.groups[expanded.group_idx];
         let case = &group.cases[expanded.case_idx];
         let layout = &plan.groups[expanded.group_idx];
+        let capped = layout.row_height;
         let inner_x = 1u16;
         let inner_w = width.saturating_sub(2);
 
-        // Clear the expanded area so rows below don't bleed through.
-        for cy in expanded.y..expanded.y + expanded.height {
-            for cx in inner_x..inner_x + inner_w {
-                if let Some(cell) = buf.cell_mut(Position::new(cx, cy)) {
-                    cell.reset();
+        let mut cx = inner_x;
+
+        // # column
+        let num_text = format!("#{} {}", case.number, case.name);
+        let num_h = (wrap_height(&num_text, layout.column_widths[0].saturating_sub(2)) + 2).max(3);
+        if num_h > capped {
+            let area = Rect::new(cx, expanded.y, layout.column_widths[0], num_h);
+            clear_rect(buf, area);
+            render_text_cell(buf, area, Text::from(num_text), Style::new().fg(COLOR_TEXT_FILLED), false);
+            let sep_y = expanded.y + num_h - 1;
+            let line_style = Style::new().fg(COLOR_MARKER);
+            for sx in cx..cx + layout.column_widths[0] {
+                if let Some(cell) = buf.cell_mut(Position::new(sx, sep_y)) {
+                    cell.set_char('─').set_style(line_style);
                 }
             }
         }
+        cx += layout.column_widths[0];
 
-        render_case_row(
-            buf,
-            inner_x,
-            expanded.y,
-            expanded.height,
-            &layout.column_widths,
-            case,
-            &app.doc.frontmatter.columns,
-            expanded.group_idx,
-            expanded.case_idx,
-            selection,
-        );
+        // Compute aligned height for middle columns (non-Decision): the max
+        // natural height so their expansions bottom-align.
+        let middle_max_h = app.doc.frontmatter.columns.iter().enumerate()
+            .filter(|(_, c)| !c.eq_ignore_ascii_case(DECISION_COLUMN))
+            .map(|(i, c)| {
+                let value = case.fields.get(c).map(String::as_str).unwrap_or("");
+                let iw = layout.column_widths[i + 1].saturating_sub(2);
+                (wrap_height(value, iw) + 2).max(3)
+            })
+            .max()
+            .unwrap_or(3);
+
+        // Index of the last non-Decision column (for right-side bar).
+        let last_middle = app.doc.frontmatter.columns.iter()
+            .rposition(|c| !c.eq_ignore_ascii_case(DECISION_COLUMN));
+
+        // Data columns
+        for (i, col) in app.doc.frontmatter.columns.iter().enumerate() {
+            let value = case.fields.get(col).cloned().unwrap_or_default();
+            let is_status = col.eq_ignore_ascii_case(DECISION_COLUMN);
+            let col_w = layout.column_widths[i + 1];
+            let inner_w = col_w.saturating_sub(2);
+
+            // Decision uses its own height; middle columns align to the max.
+            let col_h = if is_status {
+                let h = (wrap_height(&value, inner_w) + 2).max(3);
+                h.max(wrap_height_with_cursor(&value, inner_w) + 2)
+            } else {
+                middle_max_h
+            };
+
+            if col_h > capped {
+                let is_selected = is_status
+                    && selection
+                        .map(|s| s.case == (expanded.group_idx, expanded.case_idx))
+                        .unwrap_or(false);
+                let is_filled = !value.trim().is_empty();
+
+                let base_style = if is_filled {
+                    Style::new().fg(COLOR_TEXT_FILLED)
+                } else {
+                    Style::new().fg(COLOR_TEXT_EMPTY)
+                };
+
+                let cell_text = if is_status {
+                    let cursor_pos = if is_selected {
+                        selection.map(|s| s.cursor_pos.min(value.len()))
+                    } else {
+                        None
+                    };
+                    build_status_text(&value, cursor_pos)
+                } else {
+                    Text::from(value.clone())
+                };
+
+                let area = Rect::new(cx, expanded.y, col_w, col_h);
+                clear_rect(buf, area);
+                render_text_cell(buf, area, cell_text, base_style, false);
+
+                if is_selected {
+                    draw_thick_border(
+                        buf,
+                        area,
+                        Style::new()
+                            .fg(COLOR_BORDER_SELECTED)
+                            .add_modifier(Modifier::BOLD),
+                    );
+                } else if is_status {
+                    draw_thin_border(buf, area, Style::new().fg(Color::Rgb(40, 40, 40)));
+                }
+
+                // Separator line + right bar on expanded middle columns.
+                if !is_status {
+                    let accent = Style::new().fg(COLOR_MARKER);
+                    let sep_y = expanded.y + col_h - 1;
+                    for sx in cx..cx + col_w {
+                        if let Some(cell) = buf.cell_mut(Position::new(sx, sep_y)) {
+                            cell.set_char('─').set_style(accent);
+                        }
+                    }
+                    // Right-side bar only on the last middle column.
+                    if last_middle == Some(i) {
+                        let bar_x = cx + col_w - 1;
+                        for sy in expanded.y..expanded.y + col_h {
+                            if let Some(cell) = buf.cell_mut(Position::new(bar_x, sy)) {
+                                let ch = if sy == sep_y { '┘' } else { '│' };
+                                cell.set_char(ch).set_style(accent);
+                            }
+                        }
+                    }
+                }
+            }
+
+            cx += col_w;
+        }
     }
 
     render_submit_button(buf, plan.submit_y, width, app.is_on_submit());
@@ -854,7 +961,17 @@ fn render_text_cell(buf: &mut Buffer, area: Rect, text: Text<'_>, style: Style, 
         let ex = inner.x + inner.width - 1;
         let ey = inner.y + inner.height - 1;
         if let Some(cell) = buf.cell_mut(Position::new(ex, ey)) {
-            cell.set_char('…').set_style(Style::new().fg(Color::DarkGray));
+            cell.set_char('…').set_style(Style::new().fg(COLOR_MARKER));
+        }
+    }
+}
+
+fn clear_rect(buf: &mut Buffer, area: Rect) {
+    for y in area.y..area.y + area.height {
+        for x in area.x..area.x + area.width {
+            if let Some(cell) = buf.cell_mut(Position::new(x, y)) {
+                cell.reset();
+            }
         }
     }
 }
