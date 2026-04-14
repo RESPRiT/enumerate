@@ -548,30 +548,12 @@ fn render_to_tall_buffer(buf: &mut Buffer, app: &App, plan: &LayoutPlan) {
         let layout = &plan.groups[expanded.group_idx];
         let capped = layout.row_height;
         let inner_x = 1u16;
-        let inner_w = width.saturating_sub(2);
 
-        let mut cx = inner_x;
-
-        // # column
+        // Shared height for all non-Decision columns (# + middle columns)
+        // so their expansions bottom-align with one continuous separator.
         let num_text = format!("#{} {}", case.number, case.name);
-        let num_h = (wrap_height(&num_text, layout.column_widths[0].saturating_sub(2)) + 2).max(3);
-        if num_h > capped {
-            let area = Rect::new(cx, expanded.y, layout.column_widths[0], num_h);
-            clear_rect(buf, area);
-            render_text_cell(buf, area, Text::from(num_text), Style::new().fg(COLOR_TEXT_FILLED), false);
-            let sep_y = expanded.y + num_h - 1;
-            let line_style = Style::new().fg(COLOR_MARKER);
-            for sx in cx..cx + layout.column_widths[0] {
-                if let Some(cell) = buf.cell_mut(Position::new(sx, sep_y)) {
-                    cell.set_char('─').set_style(line_style);
-                }
-            }
-        }
-        cx += layout.column_widths[0];
-
-        // Compute aligned height for middle columns (non-Decision): the max
-        // natural height so their expansions bottom-align.
-        let middle_max_h = app.doc.frontmatter.columns.iter().enumerate()
+        let num_natural = (wrap_height(&num_text, layout.column_widths[0].saturating_sub(2)) + 2).max(3);
+        let shared_h = app.doc.frontmatter.columns.iter().enumerate()
             .filter(|(_, c)| !c.eq_ignore_ascii_case(DECISION_COLUMN))
             .map(|(i, c)| {
                 let value = case.fields.get(c).map(String::as_str).unwrap_or("");
@@ -579,11 +561,27 @@ fn render_to_tall_buffer(buf: &mut Buffer, app: &App, plan: &LayoutPlan) {
                 (wrap_height(value, iw) + 2).max(3)
             })
             .max()
-            .unwrap_or(3);
+            .unwrap_or(3)
+            .max(num_natural);
 
         // Index of the last non-Decision column (for right-side bar).
         let last_middle = app.doc.frontmatter.columns.iter()
             .rposition(|c| !c.eq_ignore_ascii_case(DECISION_COLUMN));
+
+        // Track the x-range of non-Decision columns for the unified separator.
+        let sep_x_start = inner_x;
+        let mut sep_x_end = inner_x;
+
+        let mut cx = inner_x;
+
+        // # column
+        if shared_h > capped {
+            let area = Rect::new(cx, expanded.y, layout.column_widths[0], shared_h);
+            clear_rect(buf, area);
+            render_text_cell(buf, area, Text::from(num_text), Style::new().fg(COLOR_TEXT_FILLED), false);
+            sep_x_end = cx + layout.column_widths[0];
+        }
+        cx += layout.column_widths[0];
 
         // Data columns
         for (i, col) in app.doc.frontmatter.columns.iter().enumerate() {
@@ -592,12 +590,12 @@ fn render_to_tall_buffer(buf: &mut Buffer, app: &App, plan: &LayoutPlan) {
             let col_w = layout.column_widths[i + 1];
             let inner_w = col_w.saturating_sub(2);
 
-            // Decision uses its own height; middle columns align to the max.
+            // Decision uses its own height; other columns align to shared_h.
             let col_h = if is_status {
                 let h = (wrap_height(&value, inner_w) + 2).max(3);
                 h.max(wrap_height_with_cursor(&value, inner_w) + 2)
             } else {
-                middle_max_h
+                shared_h
             };
 
             if col_h > capped {
@@ -640,29 +638,35 @@ fn render_to_tall_buffer(buf: &mut Buffer, app: &App, plan: &LayoutPlan) {
                     draw_thin_border(buf, area, Style::new().fg(Color::Rgb(40, 40, 40)));
                 }
 
-                // Separator line + right bar on expanded middle columns.
                 if !is_status {
-                    let accent = Style::new().fg(COLOR_MARKER);
-                    let sep_y = expanded.y + col_h - 1;
-                    for sx in cx..cx + col_w {
-                        if let Some(cell) = buf.cell_mut(Position::new(sx, sep_y)) {
-                            cell.set_char('─').set_style(accent);
-                        }
-                    }
-                    // Right-side bar only on the last middle column.
-                    if last_middle == Some(i) {
-                        let bar_x = cx + col_w - 1;
-                        for sy in expanded.y..expanded.y + col_h {
-                            if let Some(cell) = buf.cell_mut(Position::new(bar_x, sy)) {
-                                let ch = if sy == sep_y { '┘' } else { '│' };
-                                cell.set_char(ch).set_style(accent);
-                            }
-                        }
-                    }
+                    sep_x_end = cx + col_w;
                 }
             }
 
             cx += col_w;
+        }
+
+        // Unified separator line + right bar across all non-Decision columns.
+        if shared_h > capped && sep_x_end > sep_x_start {
+            let accent = Style::new().fg(COLOR_MARKER);
+            let sep_y = expanded.y + shared_h - 1;
+            for sx in sep_x_start..sep_x_end {
+                if let Some(cell) = buf.cell_mut(Position::new(sx, sep_y)) {
+                    cell.set_char('─').set_style(accent);
+                }
+            }
+            // Right-side bar on the last middle column.
+            if let Some(mi) = last_middle {
+                let bar_x = inner_x + layout.column_widths[0]
+                    + layout.column_widths[1..=mi + 1].iter().sum::<u16>()
+                    - 1;
+                for sy in expanded.y..expanded.y + shared_h {
+                    if let Some(cell) = buf.cell_mut(Position::new(bar_x, sy)) {
+                        let ch = if sy == sep_y { '┘' } else { '│' };
+                        cell.set_char(ch).set_style(accent);
+                    }
+                }
+            }
         }
     }
 
