@@ -1,8 +1,10 @@
 pub mod state;
 pub mod view;
 
+use std::io::Write;
 use std::path::Path;
 use std::process::Command;
+use std::sync::OnceLock;
 use std::time::Duration;
 
 use ansi_to_tui::IntoText;
@@ -40,9 +42,13 @@ pub fn run(file: &Path, backdrop_pane: Option<&str>) -> Result<()> {
 
     let mut app = state::App::new(file.to_path_buf(), doc, warnings, backdrop);
 
+    let prev_extended_keys = disable_tmux_extended_keys();
+
     let mut terminal = ratatui::init();
     let result = run_loop(&mut terminal, &mut app);
     ratatui::restore();
+
+    restore_tmux_extended_keys(prev_extended_keys);
     result
 }
 
@@ -109,6 +115,20 @@ fn handle_key(app: &mut state::App, key: KeyEvent) -> Result<()> {
         KeyCode::Down | KeyCode::Tab => {
             app.move_down();
         }
+        KeyCode::Left
+            if key
+                .modifiers
+                .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) =>
+        {
+            app.cursor_word_left();
+        }
+        KeyCode::Right
+            if key
+                .modifiers
+                .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) =>
+        {
+            app.cursor_word_right();
+        }
         KeyCode::Left => {
             app.cursor_left();
         }
@@ -122,8 +142,30 @@ fn handle_key(app: &mut state::App, key: KeyEvent) -> Result<()> {
             }
             app.move_down();
         }
+        KeyCode::Backspace
+            if key
+                .modifiers
+                .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) =>
+        {
+            if app.backspace_word() {
+                state_changed = true;
+            }
+        }
         KeyCode::Backspace => {
             if app.backspace_status() {
+                state_changed = true;
+            }
+        }
+        // Alt+b / Alt+f: readline-style word jump (macOS Option+Left/Right)
+        KeyCode::Char('b') if key.modifiers.contains(KeyModifiers::ALT) => {
+            app.cursor_word_left();
+        }
+        KeyCode::Char('f') if key.modifiers.contains(KeyModifiers::ALT) => {
+            app.cursor_word_right();
+        }
+        // Alt+Space: some terminals send this for Shift+Space — treat as plain space
+        KeyCode::Char(' ') if key.modifiers.contains(KeyModifiers::ALT) => {
+            if app.append_status_char(' ') {
                 state_changed = true;
             }
         }
@@ -153,9 +195,13 @@ fn handle_key(app: &mut state::App, key: KeyEvent) -> Result<()> {
                 && app.append_status_char(c)
             {
                 state_changed = true;
+            } else {
+                debug_key("Char filtered", &key);
             }
         }
-        _ => {}
+        _ => {
+            debug_key("unhandled", &key);
+        }
     }
 
     if state_changed {
@@ -164,3 +210,50 @@ fn handle_key(app: &mut state::App, key: KeyEvent) -> Result<()> {
 
     Ok(())
 }
+
+fn debug_log_path() -> Option<&'static Path> {
+    static PATH: OnceLock<Option<std::path::PathBuf>> = OnceLock::new();
+    PATH.get_or_init(|| std::env::var_os("ENUMERATE_DEBUG").map(std::path::PathBuf::from))
+        .as_deref()
+}
+
+fn debug_key(label: &str, key: &KeyEvent) {
+    let Some(path) = debug_log_path() else {
+        return;
+    };
+    let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(path) else {
+        return;
+    };
+    let _ = writeln!(f, "{label}: code={:?} mods={:?}", key.code, key.modifiers);
+}
+
+/// Disable tmux extended-keys for the current window if running inside tmux.
+/// Returns the previous value so it can be restored on exit.
+///
+/// tmux `extended-keys` sends CSI u sequences for modified keys (e.g.
+/// `\x1b[32;2u` for Shift+Space). crossterm's legacy parser doesn't recognize
+/// these, silently dropping the events. Disabling extended-keys makes tmux send
+/// standard sequences that crossterm handles correctly.
+fn disable_tmux_extended_keys() -> Option<String> {
+    std::env::var_os("TMUX")?;
+    let prev = Command::new("tmux")
+        .args(["show-option", "-wqv", "extended-keys"])
+        .output()
+        .ok()
+        .and_then(|o| {
+            let val = String::from_utf8(o.stdout).ok()?.trim().to_string();
+            if val.is_empty() { None } else { Some(val) }
+        });
+    let _ = Command::new("tmux")
+        .args(["set-option", "-w", "extended-keys", "off"])
+        .output();
+    prev
+}
+
+fn restore_tmux_extended_keys(prev: Option<String>) {
+    let Some(val) = prev else { return };
+    let _ = Command::new("tmux")
+        .args(["set-option", "-w", "extended-keys", &val])
+        .output();
+}
+

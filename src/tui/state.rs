@@ -218,6 +218,52 @@ impl App {
         self.input_cursor = next;
     }
 
+    pub fn cursor_word_left(&mut self) {
+        let Some((gi, ci)) = self.selected_case() else {
+            return;
+        };
+        let value = self.doc.groups[gi].cases[ci]
+            .fields
+            .get(DECISION_COLUMN)
+            .map(String::as_str)
+            .unwrap_or("");
+        self.input_cursor = word_boundary_left(value, self.input_cursor);
+    }
+
+    pub fn cursor_word_right(&mut self) {
+        let Some((gi, ci)) = self.selected_case() else {
+            return;
+        };
+        let value = self.doc.groups[gi].cases[ci]
+            .fields
+            .get(DECISION_COLUMN)
+            .map(String::as_str)
+            .unwrap_or("");
+        self.input_cursor = word_boundary_right(value, self.input_cursor);
+    }
+
+    pub fn backspace_word(&mut self) -> bool {
+        let Some((gi, ci)) = self.selected_case() else {
+            return false;
+        };
+        let Some(value) = self.doc.groups[gi].cases[ci].fields.get(DECISION_COLUMN) else {
+            return false;
+        };
+        if self.input_cursor == 0 || value.is_empty() {
+            return false;
+        }
+        let target = word_boundary_left(value, self.input_cursor);
+        self.snapshot();
+        let value = self.doc.groups[gi].cases[ci]
+            .fields
+            .get_mut(DECISION_COLUMN)
+            .expect("field exists");
+        value.replace_range(target..self.input_cursor, "");
+        self.input_cursor = target;
+        self.dirty = true;
+        true
+    }
+
     pub fn kill_to_line_end(&mut self) -> bool {
         let Some((gi, ci)) = self.selected_case() else {
             return false;
@@ -315,5 +361,100 @@ impl App {
         } else {
             self.progress.remove(&(gi, ci));
         }
+    }
+}
+
+/// Find the byte offset of the previous word boundary (scanning left from `pos`).
+/// Skips whitespace first, then skips non-whitespace — standard readline/emacs behavior.
+fn word_boundary_left(s: &str, pos: usize) -> usize {
+    let before = &s[..pos];
+    let mut chars: Vec<(usize, char)> = before.char_indices().collect();
+    // Skip trailing whitespace
+    while chars.last().is_some_and(|(_, c)| c.is_whitespace()) {
+        chars.pop();
+    }
+    // Skip word characters
+    while chars.last().is_some_and(|(_, c)| !c.is_whitespace()) {
+        chars.pop();
+    }
+    chars.last().map(|(i, c)| i + c.len_utf8()).unwrap_or(0)
+}
+
+/// Find the byte offset of the next word boundary (scanning right from `pos`).
+/// Skips non-whitespace first, then skips whitespace — lands at the start of the next word.
+fn word_boundary_right(s: &str, pos: usize) -> usize {
+    let after = &s[pos..];
+    let mut iter = after.char_indices();
+    // Skip current word characters
+    for (_i, c) in iter.by_ref() {
+        if c.is_whitespace() {
+            // Skip whitespace to find start of next word
+            for (j, c2) in iter {
+                if !c2.is_whitespace() {
+                    return pos + j;
+                }
+            }
+            // Trailing whitespace only — land at end of string
+            return s.len();
+        }
+    }
+    // All word characters, no whitespace — land at end of string
+    pos + after.len()
+}
+
+#[cfg(test)]
+mod word_boundary_tests {
+    use super::*;
+
+    #[test]
+    fn left_from_end_of_word() {
+        assert_eq!(word_boundary_left("hello world", 11), 6);
+    }
+
+    #[test]
+    fn left_from_middle_of_word() {
+        assert_eq!(word_boundary_left("hello world", 8), 6);
+    }
+
+    #[test]
+    fn left_skips_spaces() {
+        assert_eq!(word_boundary_left("a   b", 4), 0);
+    }
+
+    #[test]
+    fn left_at_start() {
+        assert_eq!(word_boundary_left("hello", 0), 0);
+    }
+
+    #[test]
+    fn right_from_start() {
+        assert_eq!(word_boundary_right("hello world", 0), 6);
+    }
+
+    #[test]
+    fn right_from_middle_of_word() {
+        assert_eq!(word_boundary_right("hello world", 3), 6);
+    }
+
+    #[test]
+    fn right_at_end() {
+        assert_eq!(word_boundary_right("hello", 5), 5);
+    }
+
+    #[test]
+    fn right_trailing_space() {
+        assert_eq!(word_boundary_right("hello ", 0), 6);
+    }
+
+    #[test]
+    fn right_multiple_words() {
+        assert_eq!(word_boundary_right("aa bb cc", 0), 3);
+        assert_eq!(word_boundary_right("aa bb cc", 3), 6);
+    }
+
+    #[test]
+    fn left_multiple_words() {
+        assert_eq!(word_boundary_left("aa bb cc", 8), 6);
+        assert_eq!(word_boundary_left("aa bb cc", 6), 3);
     }
 }

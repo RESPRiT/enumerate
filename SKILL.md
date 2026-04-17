@@ -66,36 +66,115 @@ After the summary (not during the walk), update all resolved Decision markers in
 
 ## Walk discipline
 
-How to write each walk step:
+How to write each walk step. The example walkthrough below is the primary reference — the rules that follow it handle edge cases.
+
+### Example walkthrough
+
+The walk output has two kinds of turns: **presenting an item** (scaffold from binary + agent prose) and **confirming a decision** (short acknowledgment + next item). Here is a complete walkthrough:
+
+---
+
+**Agent turn 1** — orientation + first item:
+
+```
+**Walking 3 items:** `(!!)` x 1 `(!)` x 1 `(?)` x 1
+
+`━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`
+`                                                    [1 of 3]`
+`(!!)` **#4 Cache invalidation on deploy**
+
+> Your note: *we got bitten by stale caches last release*
+
+The deploy script doesn't bust the CDN cache. Static assets keep serving the old bundle until TTL expires, which can be 24h.
+
+**Recommendation:** Add a `cache-bust` step to the deploy pipeline that purges the CDN after the new assets are live.
+
+**Ask:** `(a)` Add CDN purge step, or `(b)` switch to content-hashed filenames so caching is never stale? `(*)` Something else
+```
+
+**User replies:** `(a)`
+
+**Agent turn 2** — confirmation + next item:
+
+```
+Noted — adding CDN purge step to deploy pipeline. Moving on.
+
+`━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`
+`                                                    [2 of 3]`
+`(!)` **#7 Retry budget for webhook delivery**
+
+Webhooks currently retry forever on 5xx. No backoff, no cap.
+
+**Recommendation:** Exponential backoff, 5 retries max, dead-letter after that.
+
+**Ask:** `(a)` Accept 5-retry cap with dead-letter, or `(b)` keep unlimited retries but add exponential backoff? `(?)` Tell me more
+```
+
+**User replies:** what's the dead-letter behavior?
+
+**Agent turn 3** — answer + new ask (same item, no scaffold):
+
+```
+After 5 failed attempts, the payload goes to a dead-letter queue. You can inspect and manually replay from there. The webhook endpoint gets marked degraded but not disabled — future events still attempt delivery normally.
+
+**Ask:** `(a)` 5-retry cap with dead-letter queue as described, `(b)` same but also disable the endpoint after 100 consecutive failures, or `(c)` unlimited retries with exponential backoff, no dead-letter? `(*)` Something else
+```
+
+**User replies:** `(b)`
+
+**Agent turn 4** — confirmation + next item:
+
+```
+Noted — 5-retry cap, dead-letter queue, auto-disable after 100 consecutive failures. Moving on.
+
+`━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`
+`                                                    [3 of 3]`
+`(?)` **#12 Rate limit headers**
+
+Rate-limited responses currently return a bare 429. The proposal adds `Retry-After`, `X-RateLimit-Limit`, and `X-RateLimit-Remaining` headers.
+
+These are standard headers most HTTP clients and API wrappers understand. `Retry-After` tells the caller exactly when to retry. The `X-RateLimit-*` headers let callers track their budget proactively.
+
+**Ask:** `(a)` Accept — add all three headers, `(b)` just `Retry-After` and skip the `X-RateLimit-*` pair, or `(?)` tell me more?
+```
+
+---
+
+Key patterns to notice:
+
+- The **orientation header** appears once, at the top of the first turn.
+- The **scaffold** (divider + counter + case header) appears once per item, when presenting it — not on follow-up turns for the same item.
+- The **confirmation** is just "Noted — [summary]. Moving on." — no repeated case header.
+- When the user asks `(?)`, the agent answers and offers **new concrete choices** — no scaffold, no repeated context.
+- `(?)` items (turn 4) lead with explanation instead of recommendation — the user needs to understand before deciding.
+- Agent-written prose is: unlabeled **context**, then **Recommendation:**, then **Ask:**.
 
 ### Scaffold (echoed from binary)
 
-The `enumerate walk` output provides pre-rendered markdown for all mechanical parts. The agent echoes these verbatim and never constructs them itself:
+The `enumerate walk` binary outputs pre-rendered markdown for all mechanical parts. The agent echoes these verbatim and never constructs them itself:
 
-- **Orientation header**: echoed from `orientation`. Tallies walked items by marker type using inline-code-wrapped badge format: `` `(!!)` × N ``.
-- **Divider + counter**: echoed from each item's `scaffold`. Two inline-code-wrapped lines: 60 `━` (U+2501) on line 1, right-aligned `[N of M]` on line 2. Appears on every step including the first.
-- **Case header**: included in `scaffold`. Inline-code-wrapped marker badge + bold `#N` and name. No H3.
-- **Quoted note**: included in `scaffold` when the user wrote commentary beyond the bare marker. Omitted for bare markers.
+- **Orientation header**: echoed from `orientation`.
+- **Divider + counter + case header + quoted note**: echoed from each item's `scaffold`.
 
 ### Agent-written prose
 
 The agent writes these parts using the item's `fields` as source material:
 
-1. **Context** (unlabeled): prose immediately after the scaffold. Summarizes what the case is about — current state, constraints, what's at stake. The user reads this before seeing your opinion.
-2. **Recommendation:** (labeled `**Recommendation:**`): your pick. For `?` items, replace with unlabeled explanation prose — the user needs to understand the proposal before deciding.
-3. **Ask:** (labeled `**Ask:**`): the concrete question. When multiple alternatives exist, label them inline as `(a)`, `(b)`, etc. with inline-code wrapping for color. `(*)` = "something else" (open-ended escape hatch — include whenever "other" is a reasonable response). `(?)` = "tell me more / discuss further." Write choices as flowing prose, not an itemized list: ``**Ask:** `(a)` Do X, or `(b)` do Y? `(*)` Something else``
-4. **`?` items still get structured choices.** After the unlabeled explanation, the Ask should offer concrete alternatives — typically `(a)` accept the proposal as explained, `(b)` skip/decline, `(?)` tell me more.
+1. **Context** (unlabeled): what the case is about — current state, constraints, what's at stake.
+2. **Recommendation:** your pick. For `?` items, replace with unlabeled explanation — the user needs to understand the proposal before deciding.
+3. **Ask:** the concrete question. Label alternatives `(a)`, `(b)`, etc. with inline-code wrapping. `(*)` = something else. `(?)` = tell me more. Write choices as flowing prose, not a list. When re-asking after a follow-up, **relabel from `(a)`** — the user's `(a)` always refers to the most recent set of choices, not the original.
+4. **`?` items still get structured choices.** After explanation, offer `(a)` accept, `(b)` skip/decline, `(?)` tell me more.
 
 ### Behavioral rules
 
-1. **No extra separators.** Do not add `---` or other visual breaks between cases — the scaffold's divider handles all visual separation.
-2. **One item per message.** Each agent turn walks exactly one case. The first turn includes the orientation header + scaffold + prose. Subsequent turns include the scaffold + prose.
-3. **Confirmation on resolve.** When the user gives a decision, confirm with: the case header (badge + `#N` + name), then `Noted — [summary of decision]. Moving on.` on the next line. Then the next item's scaffold + prose follow. If it's the last item, the confirmation precedes the summary table instead.
-4. **Length** is ≤10 lines typical, not strict — going under is fine, going over should be rare.
-5. **One decision per step.** Never bundle nested sub-questions; if discovered, defer them as new cases.
-6. **No trailing open questions** or "things to consider later." End each step with a single concrete ask.
-7. **Defer discovered sub-cases.** If a case spawns new sub-cases mid-walk, note them for a follow-up enumeration after the walk completes. Do not expand the current step.
-8. **Track derivations.** When one decision constrains a later case, note the dependency in your reasoning ("this follows from #4b"). Don't ask for redundant ratifications.
+1. **No extra separators.** The scaffold's divider handles all visual separation.
+2. **One item per message.** Each agent turn walks exactly one case.
+3. **Confirmation on resolve.** See the example above — inline case reference + "Noted" summary, then the next item's full scaffold + prose in the same turn.
+4. **Length** is ≤10 lines typical, not strict.
+5. **One decision per step.** Never bundle nested sub-questions; defer them as new cases.
+6. **No trailing open questions.** End each step with a single concrete ask.
+7. **Defer discovered sub-cases.** Note them for a follow-up enumeration after the walk.
+8. **Track derivations.** When one decision constrains a later case, note the dependency ("this follows from #4b").
 
 ## Enumeration discipline
 
