@@ -807,17 +807,25 @@ fn render_case_row(
     case_idx: usize,
     selection: Option<CellSelection>,
 ) {
+    let is_focused = selection
+        .map(|s| s.case == (group_idx, case_idx))
+        .unwrap_or(false);
     let mut cx = base_x;
     let text_h = height.saturating_sub(2);
 
     // # column
     let num_text = format!("#{} {}", case.number, case.name);
     let num_trunc = wrap_height(&num_text, widths[0].saturating_sub(2)) > text_h;
+    let num_style = if is_focused {
+        Style::new().fg(COLOR_TEXT_FILLED)
+    } else {
+        Style::new().fg(Color::Blue)
+    };
     render_text_cell(
         buf,
         Rect::new(cx, base_y, widths[0], height),
         Text::from(num_text),
-        Style::new().fg(COLOR_TEXT_FILLED),
+        num_style,
         num_trunc,
     );
     cx += widths[0];
@@ -825,13 +833,12 @@ fn render_case_row(
     for (i, col) in columns.iter().enumerate() {
         let value = case.fields.get(col).cloned().unwrap_or_default();
         let is_status = col.eq_ignore_ascii_case(DECISION_COLUMN);
-        let is_selected = is_status
-            && selection
-                .map(|s| s.case == (group_idx, case_idx))
-                .unwrap_or(false);
+        let is_selected = is_status && is_focused;
         let is_filled = !value.trim().is_empty();
 
-        let base_style = if is_filled {
+        let base_style = if !is_focused {
+            Style::new().fg(Color::Blue)
+        } else if is_filled {
             Style::new().fg(COLOR_TEXT_FILLED)
         } else {
             Style::new().fg(COLOR_TEXT_EMPTY)
