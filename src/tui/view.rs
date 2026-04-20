@@ -577,8 +577,12 @@ fn render_to_tall_buffer(buf: &mut Buffer, app: &App, plan: &LayoutPlan) {
         // # column
         if shared_h > capped {
             let area = Rect::new(cx, expanded.y, layout.column_widths[0], shared_h);
-            clear_rect(buf, area);
+            let num_inner_w = layout.column_widths[0].saturating_sub(2);
+            let text_lines = wrap_height(&num_text, num_inner_w);
+            let text_end_col = last_col(&num_text, num_inner_w as usize) as u16;
+            dim_rect(buf, area);
             render_text_cell(buf, area, Text::from(num_text), Style::new().fg(COLOR_TEXT_FILLED), false);
+            redim_padding(buf, area, text_lines, text_end_col);
             sep_x_end = cx + layout.column_widths[0];
         }
         cx += layout.column_widths[0];
@@ -623,8 +627,20 @@ fn render_to_tall_buffer(buf: &mut Buffer, app: &App, plan: &LayoutPlan) {
                 };
 
                 let area = Rect::new(cx, expanded.y, col_w, col_h);
-                clear_rect(buf, area);
+                let text_lines = if is_selected {
+                    wrap_height_with_cursor(&value, inner_w)
+                } else {
+                    wrap_height(&value, inner_w)
+                };
+                let text_end_col = if is_selected && text_lines > wrap_height(&value, inner_w) {
+                    // Cursor wrapped to a new line — it's the only char there.
+                    1
+                } else {
+                    last_col(&value, inner_w as usize) as u16
+                };
+                dim_rect(buf, area);
                 render_text_cell(buf, area, cell_text, base_style, false);
+                redim_padding(buf, area, text_lines, text_end_col);
 
                 if is_selected {
                     draw_thick_border(
@@ -650,11 +666,42 @@ fn render_to_tall_buffer(buf: &mut Buffer, app: &App, plan: &LayoutPlan) {
         if shared_h > capped && sep_x_end > sep_x_start {
             let accent = Style::new().fg(COLOR_MARKER);
             let sep_y = expanded.y + shared_h - 1;
+
+            // Horizontal separator '─' across non-Decision columns.
             for sx in sep_x_start..sep_x_end {
                 if let Some(cell) = buf.cell_mut(Position::new(sx, sep_y)) {
                     cell.set_char('─').set_style(accent);
                 }
             }
+
+            // Connect to the leftmost table border at x=0.
+            let table_bottom = layout.table_y + layout.table_h - 1;
+            if sep_y > table_bottom {
+                // Expansion extends past the table bottom — extend the left
+                // border downward and terminate with └.
+                if let Some(cell) = buf.cell_mut(Position::new(0, table_bottom)) {
+                    cell.set_char('│').set_style(accent);
+                }
+                for sy in table_bottom + 1..sep_y {
+                    if let Some(cell) = buf.cell_mut(Position::new(0, sy)) {
+                        cell.set_char('│').set_style(accent);
+                    }
+                }
+                if let Some(cell) = buf.cell_mut(Position::new(0, sep_y)) {
+                    cell.set_char('└').set_style(accent);
+                }
+            } else if sep_y == table_bottom {
+                // Separator coincides with table bottom — L intersection.
+                if let Some(cell) = buf.cell_mut(Position::new(0, sep_y)) {
+                    cell.set_char('└').set_style(accent);
+                }
+            } else {
+                // Table border continues below — T intersection.
+                if let Some(cell) = buf.cell_mut(Position::new(0, sep_y)) {
+                    cell.set_char('├').set_style(accent);
+                }
+            }
+
             // Right-side bar on the last middle column.
             if let Some(mi) = last_middle {
                 let bar_x = inner_x + layout.column_widths[0]
@@ -667,6 +714,7 @@ fn render_to_tall_buffer(buf: &mut Buffer, app: &App, plan: &LayoutPlan) {
                     }
                 }
             }
+
         }
     }
 
@@ -970,11 +1018,53 @@ fn render_text_cell(buf: &mut Buffer, area: Rect, text: Text<'_>, style: Style, 
     }
 }
 
-fn clear_rect(buf: &mut Buffer, area: Rect) {
+fn dim_rect(buf: &mut Buffer, area: Rect) {
+    let dim = Style::new().fg(Color::Rgb(90, 90, 90));
     for y in area.y..area.y + area.height {
         for x in area.x..area.x + area.width {
             if let Some(cell) = buf.cell_mut(Position::new(x, y)) {
+                cell.set_style(dim);
+            }
+        }
+    }
+}
+
+/// Re-apply dim styling to the inner padding below rendered text.
+/// Paragraph::render overwrites the dim fg on the entire inner area;
+/// this restores it for lines below the actual text content.
+fn redim_padding(buf: &mut Buffer, area: Rect, text_lines: u16, text_end_col: u16) {
+    let dim = Style::new().fg(Color::Rgb(90, 90, 90));
+    let inner_top = area.y + 1;
+    let inner_bottom = area.y + area.height.saturating_sub(1);
+    let inner_left = area.x + 1;
+    let inner_right = area.x + area.width.saturating_sub(1);
+
+    // Blank the tail of the last text line (after text ends on that line).
+    if text_lines > 0 {
+        let last_text_y = inner_top + text_lines - 1;
+        let tail_start = inner_left + text_end_col;
+        for x in tail_start..inner_right {
+            if let Some(cell) = buf.cell_mut(Position::new(x, last_text_y)) {
                 cell.reset();
+            }
+        }
+    }
+
+    // Blank line immediately after text to visually separate.
+    let pad_start = inner_top + text_lines;
+    if pad_start < inner_bottom {
+        for x in inner_left..inner_right {
+            if let Some(cell) = buf.cell_mut(Position::new(x, pad_start)) {
+                cell.reset();
+            }
+        }
+    }
+
+    // Remaining padding: dim the obscured content.
+    for y in (pad_start + 1)..inner_bottom {
+        for x in inner_left..inner_right {
+            if let Some(cell) = buf.cell_mut(Position::new(x, y)) {
+                cell.set_style(dim);
             }
         }
     }
