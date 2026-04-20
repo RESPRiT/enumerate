@@ -9,8 +9,12 @@ use crate::doc::{Case, Doc, Group, DECISION_COLUMN};
 
 use super::state::App;
 
-const OVERLAY_PERCENT_X: u16 = 90;
-const OVERLAY_PERCENT_Y: u16 = 90;
+const MARGIN_BREAKPOINTS: [(u16, u16); 4] = [
+    (60, 3),
+    (40, 2),
+    (20, 1),
+    (0, 0),
+];
 
 const NUM_COL_WIDTH: u16 = 16;
 const STATUS_COL_WIDTH: u16 = 20;
@@ -36,7 +40,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     let dialog_area = if let Some(backdrop) = app.backdrop.clone() {
         frame.render_widget(Paragraph::new(backdrop), frame_area);
 
-        let overlay = centered_rect(frame_area, OVERLAY_PERCENT_X, OVERLAY_PERCENT_Y);
+        let overlay = margin_rect(frame_area);
         frame.render_widget(Clear, overlay);
         overlay
     } else {
@@ -65,20 +69,21 @@ fn render_dialog(frame: &mut Frame, app: &mut App, area: Rect) {
     render_body(frame, body_area, app);
 }
 
-fn centered_rect(area: Rect, percent_x: u16, percent_y: u16) -> Rect {
-    let vertical = Layout::vertical([
-        Constraint::Percentage((100 - percent_y) / 2),
-        Constraint::Percentage(percent_y),
-        Constraint::Percentage((100 - percent_y) / 2),
-    ])
-    .split(area);
+fn margin_rect(area: Rect) -> Rect {
+    let smaller = area.width.min(area.height);
+    let margin_y = MARGIN_BREAKPOINTS
+        .iter()
+        .find(|(threshold, _)| smaller >= *threshold)
+        .map(|(_, m)| *m)
+        .unwrap_or(0);
+    let margin_x = margin_y * 2;
 
-    Layout::horizontal([
-        Constraint::Percentage((100 - percent_x) / 2),
-        Constraint::Percentage(percent_x),
-        Constraint::Percentage((100 - percent_x) / 2),
-    ])
-    .split(vertical[1])[1]
+    Rect {
+        x: area.x + margin_x,
+        y: area.y + margin_y,
+        width: area.width.saturating_sub(margin_x * 2),
+        height: area.height.saturating_sub(margin_y * 2),
+    }
 }
 
 fn render_header(frame: &mut Frame, area: Rect, app: &App) {
@@ -660,6 +665,17 @@ fn render_to_tall_buffer(buf: &mut Buffer, app: &App, plan: &LayoutPlan) {
             }
 
             cx += col_w;
+        }
+
+        // Blank the table bottom border where non-Decision expansion obscures it.
+        let table_bottom = layout.table_y + layout.table_h - 1;
+        if shared_h > capped && expanded.y + shared_h > table_bottom {
+            // Only blank within non-Decision column range (sep_x_start..sep_x_end)
+            for sx in sep_x_start..sep_x_end {
+                if let Some(cell) = buf.cell_mut(Position::new(sx, table_bottom)) {
+                    cell.reset();
+                }
+            }
         }
 
         // Unified separator line + right bar across all non-Decision columns.
