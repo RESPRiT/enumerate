@@ -35,14 +35,19 @@ enum Command {
     Walk {
         /// Path to the decision document
         file: PathBuf,
+
+        /// Case numbers to exclude from the walk (e.g., items already walked
+        /// this session). Pass as comma-separated: --exclude 1,2,3
+        #[arg(long, value_delimiter = ',')]
+        exclude: Vec<u32>,
     },
 }
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
 
-    if let Some(Command::Walk { file }) = cli.command {
-        return walk::run(&file);
+    if let Some(Command::Walk { file, exclude }) = cli.command {
+        return walk::run(&file, &exclude);
     }
 
     let file = cli.file.expect("file argument required when not using a subcommand");

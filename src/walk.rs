@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::path::Path;
 
 use anyhow::{Context, Result};
@@ -92,17 +93,24 @@ fn render_orientation(counts: &[(MarkerPriority, usize)], total: usize) -> Strin
 }
 
 /// Run the walk subcommand: parse the doc, filter+sort by marker, output YAML.
-pub fn run(file: &Path) -> Result<()> {
+///
+/// `exclude` is a set of case numbers to skip — typically cases already walked
+/// earlier in the session. Empty slice means include all marked cases.
+pub fn run(file: &Path, exclude: &[u32]) -> Result<()> {
     let input = std::fs::read_to_string(file)
         .with_context(|| format!("failed to read {}", file.display()))?;
 
     let load_result = doc::parse(&input).context("failed to parse document")?;
     let doc = load_result.doc;
+    let exclude_set: HashSet<u32> = exclude.iter().copied().collect();
 
     // Collect walkable cases: (priority, note, case)
     let mut items: Vec<(MarkerPriority, String, Case)> = Vec::new();
     for group in &doc.groups {
         for case in &group.cases {
+            if exclude_set.contains(&case.number) {
+                continue;
+            }
             let decision = case.fields.get(DECISION_COLUMN).map(|s| s.as_str()).unwrap_or("");
             if let Some((priority, note)) = parse_marker(decision) {
                 items.push((priority, note.to_string(), case.clone()));

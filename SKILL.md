@@ -165,15 +165,45 @@ The agent writes these parts using the item's `fields` as source material:
 3. **Ask:** the concrete question. Label alternatives `(a)`, `(b)`, etc. with inline-code wrapping. `(*)` = something else. `(?)` = tell me more. Write choices as flowing prose, not a list. When re-asking after a follow-up, **relabel from `(a)`** — the user's `(a)` always refers to the most recent set of choices, not the original.
 4. **`?` items still get structured choices.** After explanation, offer `(a)` accept, `(b)` skip/decline, `(?)` tell me more.
 
+### Appending cases mid-walk
+
+The enumeration doc is **not frozen** during the walk. When discussion surfaces a decision that's separate from the current case, append it as a new case. Don't fold a distinct decision into the current case's choices — that collapses an independent item the user wants to track into a blended ask.
+
+**Fold vs. append vs. defer.** Same split test as Enumeration discipline rule 1: would the user take one side of the new question but not the other?
+
+- **Fold** (into current case): the new info is about *this* decision — an alternative, a constraint, a clarifying detail. Add it as `(c)`, adjust the recommendation, or re-ask.
+- **Append** (new case in this doc): the new info is a *distinct* decision the user might resolve differently. Edit the doc file directly, assign the next unused `#N`, write the content columns, and set a Decision marker (`!!`/`!`/`?`). Announce the append inline. If the user's reply *also* resolved the current ask, confirm + append + move to the next item in one turn. If the current ask is still open, re-ask it after the append — don't leave it hanging.
+- **Defer** (new `/enumerate` next time): the topic is large enough to warrant its own enumeration cycle. Mention it in the final summary; don't append.
+
+**Walking appended cases.** The captured walk sequence is fixed at the start — appended items aren't in it. After finishing the last captured item, if you appended any marked cases, run `enumerate walk <path> --exclude <N>,<N>,...` passing the numbers you already walked this session. The binary returns only the still-marked cases you haven't seen (your appends). Walk those, then summarize. If you didn't append anything marked, go straight to the summary.
+
+**Mechanics.** Use the Edit tool on the doc file directly. Place the new case in the same H2 group as the parent case unless it clearly belongs elsewhere. Use the next integer above the highest existing `#N` — numbers are stable and gap-allowed, so this is always safe.
+
+### Example: append during walk
+
+Mid-walk on #7 (webhook retry budget), the user's reply introduces a distinct decision:
+
+**User replies:** wait — should idempotency keys be required for POST retries? that's its own question.
+
+**Agent turn** — append + re-ask #7:
+
+```
+Good point — that's a separate decision. Appending as **#18 Idempotency keys for POST** with `(!)`.
+
+Staying on #7: `(a)` 5-retry cap with dead-letter, or `(b)` unlimited retries with exponential backoff? `(*)` Something else.
+```
+
+Behind the scenes, the agent uses the Edit tool to add a `### #18 Idempotency keys for POST` block to the doc with content columns and a `(!)` Decision marker. After the captured walk sequence ends, the agent re-runs `enumerate walk <path>` to pick up #18.
+
 ### Behavioral rules
 
 1. **No extra separators.** The scaffold's divider handles all visual separation.
 2. **One item per message.** Each agent turn walks exactly one case.
 3. **Confirmation on resolve.** See the example above — inline case reference + "Noted" summary, then the next item's full scaffold + prose in the same turn.
 4. **Length** is ≤10 lines typical, not strict.
-5. **One decision per step.** Never bundle nested sub-questions; defer them as new cases.
+5. **One decision per step.** Never bundle nested sub-questions into the current ask. If a related decision surfaces, append it (see Appending cases mid-walk) rather than tacking it onto the ask.
 6. **No trailing open questions.** End each step with a single concrete ask.
-7. **Defer discovered sub-cases.** Note them for a follow-up enumeration after the walk.
+7. **Append distinct decisions, don't bundle.** When discussion reveals a new decision, append it per Appending cases mid-walk. Don't merge it into the current case's options or let it vanish into conversation.
 8. **Track derivations.** When one decision constrains a later case, note the dependency ("this follows from #4b").
 
 ## Enumeration discipline
