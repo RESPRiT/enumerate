@@ -667,12 +667,17 @@ fn render_to_tall_buffer(buf: &mut Buffer, app: &App, plan: &LayoutPlan) {
             cx += col_w;
         }
 
-        // Blank the table bottom border where non-Decision expansion obscures it.
+        // Blank the table bottom border where non-Decision expansion obscures
+        // it, but preserve cells already overwritten by expansion text. This
+        // loop runs after the column render, so resetting indiscriminately
+        // would punch a blank line through any text that wrapped down to the
+        // table_bottom row.
         let table_bottom = layout.table_y + layout.table_h - 1;
         if shared_h > capped && expanded.y + shared_h > table_bottom {
-            // Only blank within non-Decision column range (sep_x_start..sep_x_end)
             for sx in sep_x_start..sep_x_end {
-                if let Some(cell) = buf.cell_mut(Position::new(sx, table_bottom)) {
+                if let Some(cell) = buf.cell_mut(Position::new(sx, table_bottom))
+                    && cell.symbol() == "─"
+                {
                     cell.reset();
                 }
             }
