@@ -544,6 +544,10 @@ fn render_to_tall_buffer(buf: &mut Buffer, app: &App, plan: &LayoutPlan) {
         render_table(buf, layout.table_y, width, group, gi, &app.doc.frontmatter.columns, layout, selection);
     }
 
+    // Render Submit before the expansion overlay so a tall expansion can
+    // obscure it the same way it obscures other content below the table.
+    render_submit_button(buf, plan.submit_y, width, app.is_on_submit());
+
     // Expanded row overlay: re-render only columns whose content exceeds
     // the capped height. Columns that fit stay at their initial render so
     // they don't blank out rows below in unrelated columns.
@@ -739,8 +743,6 @@ fn render_to_tall_buffer(buf: &mut Buffer, app: &App, plan: &LayoutPlan) {
 
         }
     }
-
-    render_submit_button(buf, plan.submit_y, width, app.is_on_submit());
 }
 
 #[derive(Clone, Copy)]
