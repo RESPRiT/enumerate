@@ -28,7 +28,7 @@ Format rules:
 - Field markers are `**FieldName:**` followed by inline value or block content.
 - **Do not include the Decision column.** The binary appends it on load.
 
-See `docs/sample.md` for a complete conformant example. The full format spec lives in `docs/V1_SPEC.md`.
+See `tests/fixtures/sample.md` for a complete conformant example. The full format spec lives in `docs/V1_SPEC.md`.
 
 Case shape and density are constrained by the **Enumeration discipline** section below.
 

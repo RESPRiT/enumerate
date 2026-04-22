@@ -92,9 +92,9 @@ Claude will explore the topic, write `./.enumerate/2026-04-08-auth-middleware-re
 You can also point the binary at any conformant doc:
 
 ```sh
-enumerate ./docs/sample.md            # full-screen TUI in the current terminal
-enumerate ./docs/sample.md --window   # spawn the TUI in a new tmux window (requires $TMUX)
-enumerate ./docs/sample.md --popup    # same, with the current pane captured as a dimmed backdrop
+enumerate ./tests/fixtures/sample.md            # full-screen TUI in the current terminal
+enumerate ./tests/fixtures/sample.md --window   # spawn the TUI in a new tmux window (requires $TMUX)
+enumerate ./tests/fixtures/sample.md --popup    # same, with the current pane captured as a dimmed backdrop
 ```
 
 `--popup` is what the skill calls from inside tmux. It captures the current pane via `tmux capture-pane`, spawns a new window, and the TUI renders the snapshot dimmed behind a centered overlay. Both `--window` and `--popup` block until the user closes the window. Outside tmux they error out — the skill detects `$TMUX` itself and falls back to instructing the user to run plain `enumerate <path>` manually.
@@ -130,7 +130,7 @@ The `Decision` column is appended automatically by the binary on load — templa
 ```sh
 cargo build              # debug build
 cargo test               # run round-trip parser tests
-cargo run -- ./docs/sample.md
+cargo run -- ./tests/fixtures/sample.md
 ```
 
 Project layout:

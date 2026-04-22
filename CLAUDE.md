@@ -25,7 +25,7 @@ This repo ships two coupled artifacts: a Rust TUI binary (`enumerate`) and a Cla
 ```
 cargo build                     # debug build
 cargo test                      # parser round-trip tests
-cargo run -- ./docs/sample.md   # run TUI on a sample doc
+cargo run -- ./tests/fixtures/sample.md   # run TUI on a sample doc
 cargo install --path .          # install to ~/.cargo/bin (needed for /enumerate)
 ```
 
