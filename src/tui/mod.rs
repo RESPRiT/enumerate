@@ -10,8 +10,11 @@ use std::time::Duration;
 use ansi_to_tui::IntoText;
 use anyhow::{Context, Result};
 use ratatui::DefaultTerminal;
+use ratatui::Terminal;
+use ratatui::backend::TestBackend;
+use ratatui::buffer::Buffer;
 use ratatui::crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
-use ratatui::style::{Color, Style};
+use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::Text;
 
 use crate::doc::{self, LoadResult};
@@ -50,6 +53,120 @@ pub fn run(file: &Path, backdrop_pane: Option<&str>) -> Result<()> {
 
     restore_tmux_extended_keys(prev_extended_keys);
     result
+}
+
+/// Non-interactive render: draw one frame to an offscreen buffer and write it
+/// to `out` as ANSI-escaped text. Used by `--render WxH` for snapshot
+/// debugging; no terminal takeover, no input loop.
+pub fn render_snapshot<W: Write>(
+    file: &Path,
+    width: u16,
+    height: u16,
+    cursor: usize,
+    out: &mut W,
+) -> Result<()> {
+    let input = std::fs::read_to_string(file)
+        .with_context(|| format!("failed to read {}", file.display()))?;
+    let LoadResult { doc, warnings } = doc::parse(&input)?;
+
+    let mut app = state::App::new(file.to_path_buf(), doc, warnings, None);
+    app.cursor = cursor.min(app.submit_index());
+
+    let mut terminal = Terminal::new(TestBackend::new(width, height))
+        .context("failed to build test backend")?;
+    terminal
+        .draw(|frame| view::render(frame, &mut app))
+        .context("failed to render frame")?;
+
+    write_buffer_ansi(terminal.backend().buffer(), out)
+}
+
+fn write_buffer_ansi<W: Write>(buf: &Buffer, out: &mut W) -> Result<()> {
+    let area = buf.area();
+    for y in 0..area.height {
+        let mut prev: Option<(Color, Color, Modifier)> = None;
+        for x in 0..area.width {
+            let Some(cell) = buf.cell((x, y)) else { continue };
+            let key = (cell.fg, cell.bg, cell.modifier);
+            if prev != Some(key) {
+                out.write_all(b"\x1b[0m")?;
+                write_modifier(out, cell.modifier)?;
+                write_fg(out, cell.fg)?;
+                write_bg(out, cell.bg)?;
+                prev = Some(key);
+            }
+            out.write_all(cell.symbol().as_bytes())?;
+        }
+        out.write_all(b"\x1b[0m\n")?;
+    }
+    Ok(())
+}
+
+fn write_modifier<W: Write>(out: &mut W, m: Modifier) -> std::io::Result<()> {
+    if m.contains(Modifier::BOLD) {
+        out.write_all(b"\x1b[1m")?;
+    }
+    if m.contains(Modifier::DIM) {
+        out.write_all(b"\x1b[2m")?;
+    }
+    if m.contains(Modifier::ITALIC) {
+        out.write_all(b"\x1b[3m")?;
+    }
+    if m.contains(Modifier::UNDERLINED) {
+        out.write_all(b"\x1b[4m")?;
+    }
+    if m.contains(Modifier::REVERSED) {
+        out.write_all(b"\x1b[7m")?;
+    }
+    Ok(())
+}
+
+fn write_fg<W: Write>(out: &mut W, c: Color) -> std::io::Result<()> {
+    match c {
+        Color::Reset => Ok(()),
+        Color::Black => out.write_all(b"\x1b[30m"),
+        Color::Red => out.write_all(b"\x1b[31m"),
+        Color::Green => out.write_all(b"\x1b[32m"),
+        Color::Yellow => out.write_all(b"\x1b[33m"),
+        Color::Blue => out.write_all(b"\x1b[34m"),
+        Color::Magenta => out.write_all(b"\x1b[35m"),
+        Color::Cyan => out.write_all(b"\x1b[36m"),
+        Color::Gray => out.write_all(b"\x1b[37m"),
+        Color::DarkGray => out.write_all(b"\x1b[90m"),
+        Color::LightRed => out.write_all(b"\x1b[91m"),
+        Color::LightGreen => out.write_all(b"\x1b[92m"),
+        Color::LightYellow => out.write_all(b"\x1b[93m"),
+        Color::LightBlue => out.write_all(b"\x1b[94m"),
+        Color::LightMagenta => out.write_all(b"\x1b[95m"),
+        Color::LightCyan => out.write_all(b"\x1b[96m"),
+        Color::White => out.write_all(b"\x1b[97m"),
+        Color::Rgb(r, g, b) => write!(out, "\x1b[38;2;{};{};{}m", r, g, b),
+        Color::Indexed(i) => write!(out, "\x1b[38;5;{}m", i),
+    }
+}
+
+fn write_bg<W: Write>(out: &mut W, c: Color) -> std::io::Result<()> {
+    match c {
+        Color::Reset => Ok(()),
+        Color::Black => out.write_all(b"\x1b[40m"),
+        Color::Red => out.write_all(b"\x1b[41m"),
+        Color::Green => out.write_all(b"\x1b[42m"),
+        Color::Yellow => out.write_all(b"\x1b[43m"),
+        Color::Blue => out.write_all(b"\x1b[44m"),
+        Color::Magenta => out.write_all(b"\x1b[45m"),
+        Color::Cyan => out.write_all(b"\x1b[46m"),
+        Color::Gray => out.write_all(b"\x1b[47m"),
+        Color::DarkGray => out.write_all(b"\x1b[100m"),
+        Color::LightRed => out.write_all(b"\x1b[101m"),
+        Color::LightGreen => out.write_all(b"\x1b[102m"),
+        Color::LightYellow => out.write_all(b"\x1b[103m"),
+        Color::LightBlue => out.write_all(b"\x1b[104m"),
+        Color::LightMagenta => out.write_all(b"\x1b[105m"),
+        Color::LightCyan => out.write_all(b"\x1b[106m"),
+        Color::White => out.write_all(b"\x1b[107m"),
+        Color::Rgb(r, g, b) => write!(out, "\x1b[48;2;{};{};{}m", r, g, b),
+        Color::Indexed(i) => write!(out, "\x1b[48;5;{}m", i),
+    }
 }
 
 fn capture_pane(pane_id: &str) -> Result<Text<'static>> {
