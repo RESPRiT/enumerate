@@ -588,10 +588,9 @@ fn render_to_tall_buffer(buf: &mut Buffer, app: &App, plan: &LayoutPlan) {
             let area = Rect::new(cx, expanded.y, layout.column_widths[0], shared_h);
             let num_inner_w = layout.column_widths[0].saturating_sub(2);
             let text_lines = wrap_height(&num_text, num_inner_w);
-            let text_end_col = last_col(&num_text, num_inner_w as usize) as u16;
             prep_expansion_rect(buf, area, text_lines);
             render_text_cell(buf, area, Text::from(num_text), Style::new().fg(COLOR_TEXT_FILLED), false);
-            redim_padding(buf, area, text_lines, text_end_col);
+            redim_padding(buf, area, text_lines);
             sep_x_end = cx + layout.column_widths[0];
         }
         cx += layout.column_widths[0];
@@ -641,15 +640,9 @@ fn render_to_tall_buffer(buf: &mut Buffer, app: &App, plan: &LayoutPlan) {
                 } else {
                     wrap_height(&value, inner_w)
                 };
-                let text_end_col = if is_selected && text_lines > wrap_height(&value, inner_w) {
-                    // Cursor wrapped to a new line — it's the only char there.
-                    1
-                } else {
-                    last_col(&value, inner_w as usize) as u16
-                };
                 prep_expansion_rect(buf, area, text_lines);
                 render_text_cell(buf, area, cell_text, base_style, false);
-                redim_padding(buf, area, text_lines, text_end_col);
+                redim_padding(buf, area, text_lines);
 
                 if is_selected {
                     draw_thick_border(
@@ -1077,7 +1070,7 @@ fn prep_expansion_rect(buf: &mut Buffer, area: Rect, text_lines: u16) {
 /// Re-apply dim styling to the inner padding below rendered text.
 /// Paragraph::render overwrites the dim fg on the entire inner area;
 /// this restores it for lines below the actual text content.
-fn redim_padding(buf: &mut Buffer, area: Rect, text_lines: u16, text_end_col: u16) {
+fn redim_padding(buf: &mut Buffer, area: Rect, text_lines: u16) {
     let dim = Style::new().fg(Color::Rgb(60, 70, 110));
     let inner_top = area.y + 1;
     let inner_bottom = area.y + area.height.saturating_sub(1);
@@ -1085,9 +1078,24 @@ fn redim_padding(buf: &mut Buffer, area: Rect, text_lines: u16, text_end_col: u1
     let inner_right = area.x + area.width.saturating_sub(1);
 
     // Blank the tail of the last text line (after text ends on that line).
+    // We scan the actual rendered buffer from the right rather than predict
+    // the column from wrap math — Ratatui's wrap handles span-adjacent word
+    // units (e.g., "renders█" with no whitespace between them) in ways our
+    // word-wrap estimator doesn't, and a wrong estimate would blank visible
+    // characters.
     if text_lines > 0 {
         let last_text_y = inner_top + text_lines - 1;
-        let tail_start = inner_left + text_end_col;
+        let mut tail_start = inner_right;
+        for x in (inner_left..inner_right).rev() {
+            let filled = buf
+                .cell(Position::new(x, last_text_y))
+                .map(|c| c.symbol() != " ")
+                .unwrap_or(false);
+            if filled {
+                break;
+            }
+            tail_start = x;
+        }
         for x in tail_start..inner_right {
             if let Some(cell) = buf.cell_mut(Position::new(x, last_text_y)) {
                 cell.reset();

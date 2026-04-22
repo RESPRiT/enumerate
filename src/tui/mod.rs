@@ -71,6 +71,15 @@ pub fn render_snapshot<W: Write>(
 
     let mut app = state::App::new(file.to_path_buf(), doc, warnings, None);
     app.cursor = cursor.min(app.submit_index());
+    // Match interactive nav: input_cursor sits at end of the selected cell's
+    // value (move_up/move_down's reset_input_cursor behavior).
+    if let Some((gi, ci)) = app.selected_case() {
+        app.input_cursor = app.doc.groups[gi].cases[ci]
+            .fields
+            .get(crate::doc::DECISION_COLUMN)
+            .map(|s| s.len())
+            .unwrap_or(0);
+    }
 
     let mut terminal = Terminal::new(TestBackend::new(width, height))
         .context("failed to build test backend")?;
