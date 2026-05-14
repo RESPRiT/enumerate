@@ -235,6 +235,32 @@ fn handle_key(app: &mut state::App, key: KeyEvent) -> Result<()> {
             app.quit = true;
             return Ok(());
         }
+        KeyCode::Up
+            if key
+                .modifiers
+                .intersects(KeyModifiers::SHIFT | KeyModifiers::ALT) =>
+        {
+            app.move_section_up();
+        }
+        KeyCode::Down
+            if key
+                .modifiers
+                .intersects(KeyModifiers::SHIFT | KeyModifiers::ALT) =>
+        {
+            app.move_section_down();
+        }
+        KeyCode::PageUp => {
+            app.move_section_up();
+        }
+        KeyCode::PageDown => {
+            app.move_section_down();
+        }
+        KeyCode::Home => {
+            app.move_to_first();
+        }
+        KeyCode::End => {
+            app.move_to_last();
+        }
         KeyCode::Up | KeyCode::BackTab => {
             app.move_up();
         }

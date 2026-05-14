@@ -112,6 +112,76 @@ impl App {
         }
     }
 
+    pub fn move_to_first(&mut self) {
+        if self.cursor != 0 && !self.selectable.is_empty() {
+            self.commit_current_progress();
+            self.cursor = 0;
+            self.reset_input_cursor();
+        }
+    }
+
+    pub fn move_to_last(&mut self) {
+        if self.selectable.is_empty() {
+            return;
+        }
+        let target = self.selectable.len() - 1;
+        if self.cursor != target {
+            self.commit_current_progress();
+            self.cursor = target;
+            self.reset_input_cursor();
+        }
+    }
+
+    pub fn move_section_down(&mut self) {
+        if self.is_on_submit() {
+            return;
+        }
+        let Some((cur_gi, _)) = self.selectable.get(self.cursor).copied() else {
+            return;
+        };
+        let target = self
+            .selectable
+            .iter()
+            .position(|&(gi, _)| gi > cur_gi)
+            .unwrap_or_else(|| self.submit_index());
+        if target != self.cursor {
+            self.commit_current_progress();
+            self.cursor = target;
+            self.reset_input_cursor();
+        }
+    }
+
+    pub fn move_section_up(&mut self) {
+        if self.is_on_submit() {
+            if let Some(idx) = self.selectable.iter().rposition(|&(_, ci)| ci == 0) {
+                self.commit_current_progress();
+                self.cursor = idx;
+                self.reset_input_cursor();
+            }
+            return;
+        }
+        let Some((cur_gi, cur_ci)) = self.selectable.get(self.cursor).copied() else {
+            return;
+        };
+        let target_gi = if cur_ci > 0 {
+            cur_gi
+        } else if cur_gi > 0 {
+            cur_gi - 1
+        } else {
+            return;
+        };
+        if let Some(idx) = self
+            .selectable
+            .iter()
+            .position(|&(gi, ci)| gi == target_gi && ci == 0)
+            && idx != self.cursor
+        {
+            self.commit_current_progress();
+            self.cursor = idx;
+            self.reset_input_cursor();
+        }
+    }
+
     fn reset_input_cursor(&mut self) {
         self.input_cursor = self
             .selected_case()
