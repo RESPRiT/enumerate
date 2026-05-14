@@ -29,6 +29,8 @@ const COLOR_TEXT_FILLED: Color = Color::White;
 const COLOR_TEXT_EMPTY: Color = Color::DarkGray;
 const COLOR_HEADER: Color = Color::Yellow;
 const COLOR_MARKER: Color = Color::Rgb(255, 230, 80);
+const MODAL_BG: Color = Color::Black;
+const SELECTED_ROW_BG: Color = Color::Rgb(28, 32, 48);
 
 pub fn render(frame: &mut Frame, app: &mut App) {
     let frame_area = frame.area();
@@ -53,7 +55,8 @@ pub fn render(frame: &mut Frame, app: &mut App) {
 fn render_dialog(frame: &mut Frame, app: &mut App, area: Rect) {
     let outer = Block::bordered()
         .border_type(BorderType::Thick)
-        .padding(Padding::new(2, 2, 1, 1));
+        .padding(Padding::new(2, 2, 1, 1))
+        .style(Style::new().bg(MODAL_BG));
     let inner_area = outer.inner(area);
     frame.render_widget(outer, area);
 
@@ -589,7 +592,11 @@ fn render_to_tall_buffer(buf: &mut Buffer, app: &App, plan: &LayoutPlan) {
             let num_inner_w = layout.column_widths[0].saturating_sub(2);
             let text_lines = wrap_height(&num_text, num_inner_w);
             prep_expansion_rect(buf, area, text_lines);
-            render_text_cell(buf, area, Text::from(num_text), Style::new().fg(COLOR_TEXT_FILLED), false);
+            let num_cell_text = Text::from(Line::from(vec![
+                Span::styled(format!("#{}", case.number), Style::new().fg(COLOR_MARKER)),
+                Span::raw(format!(" {}", case.name)),
+            ]));
+            render_text_cell(buf, area, num_cell_text, Style::new().fg(COLOR_TEXT_FILLED), false);
             redim_padding(buf, area, text_lines);
             sep_x_end = cx + layout.column_widths[0];
         }
@@ -736,6 +743,83 @@ fn render_to_tall_buffer(buf: &mut Buffer, app: &App, plan: &LayoutPlan) {
 
         }
     }
+
+    if let Some((gi, ci)) = app.selected_case() {
+        paint_selected_row_bg(buf, app, plan, gi, ci);
+    }
+}
+
+fn paint_selected_row_bg(
+    buf: &mut Buffer,
+    app: &App,
+    plan: &LayoutPlan,
+    gi: usize,
+    ci: usize,
+) {
+    let layout = &plan.groups[gi];
+    let width = buf.area().width;
+    let capped = layout.row_height;
+    let inner_x: u16 = 1;
+    let columns = &app.doc.frontmatter.columns;
+    let case = &app.doc.groups[gi].cases[ci];
+
+    let row_y = if let Some(ref expanded) = plan.expanded {
+        if (expanded.group_idx, expanded.case_idx) == (gi, ci) {
+            expanded.y
+        } else {
+            return;
+        }
+    } else {
+        layout.table_y + 1 + 2 + (ci as u16) * layout.row_height
+    };
+    let top_y = if ci == 0 { layout.table_y } else { row_y };
+    let table_bottom_y = layout.table_y + layout.table_h - 1;
+    // Extend by 1 row when the bg's exclusive-bottom lands exactly on the
+    // table's bottom-border row — so the border reads as part of the
+    // highlighted row, not a black strip below it.
+    let extend_to_border = |bottom: u16| if bottom == table_bottom_y { bottom + 1 } else { bottom };
+
+    let bg = Style::new().bg(SELECTED_ROW_BG);
+
+    if plan.expanded.is_some() {
+        let num_inner_w = layout.column_widths[0].saturating_sub(2);
+        let num_text = format!("#{} {}", case.number, case.name);
+        let num_natural = (wrap_height(&num_text, num_inner_w) + 2).max(3);
+        let shared_h = columns.iter().enumerate()
+            .filter(|(_, c)| !c.eq_ignore_ascii_case(DECISION_COLUMN))
+            .map(|(i, c)| {
+                let value = case.fields.get(c).map(String::as_str).unwrap_or("");
+                let iw = layout.column_widths[i + 1].saturating_sub(2);
+                (wrap_height(value, iw) + 2).max(3)
+            })
+            .max()
+            .unwrap_or(3)
+            .max(num_natural);
+        let non_dec_h = shared_h.max(capped);
+
+        let dec_idx = columns.iter()
+            .position(|c| c.eq_ignore_ascii_case(DECISION_COLUMN));
+        let split_x = dec_idx
+            .map(|idx| inner_x + layout.column_widths[..=idx].iter().sum::<u16>())
+            .unwrap_or(width);
+
+        let dec_h = dec_idx.map(|idx| {
+            let col_w = layout.column_widths[idx + 1];
+            let inner_w = col_w.saturating_sub(2);
+            let value = case.fields.get(DECISION_COLUMN).map(String::as_str).unwrap_or("");
+            let h = (wrap_height(value, inner_w) + 2).max(3);
+            h.max(wrap_height_with_cursor(value, inner_w) + 2).max(capped)
+        }).unwrap_or(capped);
+
+        let nd_h = extend_to_border(row_y + non_dec_h).saturating_sub(top_y);
+        let d_h = extend_to_border(row_y + dec_h).saturating_sub(top_y);
+
+        buf.set_style(Rect::new(0, top_y, split_x, nd_h), bg);
+        buf.set_style(Rect::new(split_x, top_y, width.saturating_sub(split_x), d_h), bg);
+    } else {
+        let h = extend_to_border(row_y + layout.row_height).saturating_sub(top_y);
+        buf.set_style(Rect::new(0, top_y, width, h), bg);
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -832,15 +916,19 @@ fn render_case_row(
     // # column
     let num_text = format!("#{} {}", case.number, case.name);
     let num_trunc = wrap_height(&num_text, widths[0].saturating_sub(2)) > text_h;
-    let num_style = if is_focused {
-        Style::new().fg(COLOR_TEXT_FILLED)
+    let (cell_text, num_style) = if is_focused {
+        let text = Text::from(Line::from(vec![
+            Span::styled(format!("#{}", case.number), Style::new().fg(COLOR_MARKER)),
+            Span::raw(format!(" {}", case.name)),
+        ]));
+        (text, Style::new().fg(COLOR_TEXT_FILLED))
     } else {
-        Style::new().fg(Color::Blue)
+        (Text::from(num_text), Style::new().fg(Color::Blue))
     };
     render_text_cell(
         buf,
         Rect::new(cx, base_y, widths[0], height),
-        Text::from(num_text),
+        cell_text,
         num_style,
         num_trunc,
     );
@@ -1222,6 +1310,10 @@ fn render_submit_button(buf: &mut Buffer, y: u16, width: u16, selected: bool) {
         .alignment(Alignment::Center)
         .style(text_style)
         .render(inner, buf);
+
+    if selected {
+        buf.set_style(area, Style::new().bg(SELECTED_ROW_BG));
+    }
 }
 
 fn blit(src: &Buffer, src_y: u16, dst: &mut Buffer, dst_area: Rect) {
@@ -1236,6 +1328,12 @@ fn blit(src: &Buffer, src_y: u16, dst: &mut Buffer, dst_area: Rect) {
                 && let Some(dst_cell) = dst.cell_mut(dst_pos)
             {
                 *dst_cell = src_cell.clone();
+                let cur = dst_cell.style();
+                let bg = match cur.bg {
+                    Some(Color::Reset) | None => MODAL_BG,
+                    Some(c) => c,
+                };
+                dst_cell.set_style(cur.bg(bg));
             }
         }
     }
