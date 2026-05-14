@@ -17,14 +17,26 @@ The repo ships two pieces that work together:
   writes ./.enumerate/<YYYY-MM-DD>-<topic-slug>.md
         │
         ▼
-  Claude runs `enumerate <path> --popup`
-        │
-        ▼
-  TUI opens in a new tmux window, overlaid on a
-  dimmed snapshot of your Claude Code pane
-  → you mark each case with !! / ! / ? / OK
+  Open the TUI — branches on whether Claude Code is
+  running inside tmux ($TMUX set):
+
+   Inside tmux                  Outside tmux
+   ───────────                  ────────────
+   Claude runs                  Claude ends its turn
+   `enumerate <path> --popup`   and asks you to run
+   in the background.           `enumerate <path>`
+   TUI opens in a new tmux      yourself in another
+   window, overlaid on a        terminal. Reply when
+   dimmed snapshot of your      you're done so Claude
+   Claude Code pane. Claude     can re-read the file.
+   waits for the window to
+   close.
+        │                              │
+        └──────────────┬───────────────┘
+                       ▼
+  → mark each case with !! / ! / ? / OK
   → autosaves on every keystroke
-  → close the window when done
+  → close the window (or the editor) when done
         │
         ▼
   Claude re-reads the file and walks you through
@@ -85,7 +97,12 @@ Restart Claude Code (or start a new session) and `/enumerate` should be availabl
 /enumerate the auth middleware rewrite
 ```
 
-Claude will explore the topic, write `./.enumerate/2026-04-08-auth-middleware-rewrite.md` (date-prefixed for chronological sorting), open it in a new tmux window with the chat snapshot dimmed behind it, and then walk you through your marked items once you close the window.
+Claude explores the topic and writes `./.enumerate/2026-04-08-auth-middleware-rewrite.md` (date-prefixed for chronological sorting). What happens next depends on whether the Claude Code session itself is running inside tmux:
+
+- **Inside tmux (`$TMUX` is set in Claude Code's shell).** Claude runs `enumerate <path> --popup` itself via the Bash tool. The binary spawns a new tmux window and the TUI renders over a dimmed snapshot of your Claude Code pane. The Bash call backgrounds and Claude waits for the window-close notification before re-reading the file. This is the seamless in-session flow.
+- **Outside tmux (`$TMUX` unset).** `--popup` errors out non-zero outside tmux, so Claude does **not** invoke the binary. Instead it ends its turn and tells you to run `enumerate <path>` yourself in another terminal (full-screen TUI, no overlay). Reply in the chat when you've closed the editor — Claude re-reads the file and continues with the walk.
+
+Either way, once the file is annotated, Claude walks you through your marked items one at a time.
 
 ### Standalone
 
