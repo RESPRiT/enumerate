@@ -59,14 +59,20 @@ enum Command {
         /// this session). Pass as comma-separated: --exclude 1,2,3
         #[arg(long, value_delimiter = ',')]
         exclude: Vec<u32>,
+
+        /// Divider width in columns, overriding the measured tmux pane width.
+        /// Clamped to 20..=100. Defaults to the pane width less a 2-column
+        /// gutter, or 60 when the pane can't be measured.
+        #[arg(long, value_name = "COLS")]
+        width: Option<usize>,
     },
 }
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
 
-    if let Some(Command::Walk { file, exclude }) = cli.command {
-        return walk::run(&file, &exclude);
+    if let Some(Command::Walk { file, exclude, width }) = cli.command {
+        return walk::run(&file, &exclude, width);
     }
 
     let file = cli.file.expect("file argument required when not using a subcommand");

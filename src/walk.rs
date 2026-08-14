@@ -51,13 +51,72 @@ fn marker_tally_badge(priority: MarkerPriority) -> &'static str {
     }
 }
 
-const BAR_WIDTH: usize = 60;
 const BAR_CHAR: char = '━';
 
-fn render_divider(index: usize, total: usize) -> String {
-    let bar: String = std::iter::repeat(BAR_CHAR).take(BAR_WIDTH).collect();
+/// Divider width used when the pane can't be measured — no tmux, or tmux
+/// declined to answer. Matches the width the walk shipped with before the
+/// divider became pane-relative, so an unmeasured run looks unremarkable.
+const DEFAULT_BAR_WIDTH: usize = 60;
+
+/// Floor and ceiling on the divider width. The floor keeps a very narrow pane
+/// from collapsing the bar to a stub shorter than the `[N of M]` counter it
+/// right-aligns against; the ceiling keeps a wide terminal from rendering a
+/// full-width wall of `━` that reads as noise rather than as a separator.
+const MIN_BAR_WIDTH: usize = 20;
+const MAX_BAR_WIDTH: usize = 100;
+
+/// Columns of left gutter the agent's rendered message sits behind, subtracted
+/// from the pane width so the bar ends inside the window rather than wrapping.
+const GUTTER_COLS: usize = 2;
+
+/// Width of the tmux pane this process was launched from, in columns.
+///
+/// `enumerate walk` runs as a child of the agent, whose stdout is a pipe rather
+/// than a terminal — so there is no window size to read from the fd, and
+/// `$COLUMNS` arrives as 0. tmux is the only source that knows the real size.
+/// `$TMUX_PANE` names the pane the caller occupies; without it tmux answers for
+/// the session's active pane, which is the same pane in the common case.
+///
+/// Returns `None` whenever the measurement isn't trustworthy — outside tmux, if
+/// the binary is missing, or if the reply doesn't parse as a number — leaving
+/// the caller to fall back rather than act on a guess.
+fn tmux_pane_width() -> Option<usize> {
+    if std::env::var_os("TMUX").is_none() {
+        return None;
+    }
+
+    let mut cmd = std::process::Command::new("tmux");
+    cmd.arg("display-message").arg("-p");
+    if let Some(pane) = std::env::var_os("TMUX_PANE") {
+        cmd.arg("-t").arg(pane);
+    }
+    cmd.arg("#{pane_width}");
+
+    let output = cmd.output().ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    std::str::from_utf8(&output.stdout).ok()?.trim().parse().ok()
+}
+
+/// Resolve the divider width from an explicit override or a pane measurement.
+///
+/// `override_width` is the `--width` escape hatch: it replaces the measurement,
+/// not the clamp, so a wildly out-of-range value still renders a usable bar.
+fn resolve_bar_width(override_width: Option<usize>) -> usize {
+    let measured = match override_width {
+        Some(width) => width,
+        None => tmux_pane_width()
+            .map(|cols| cols.saturating_sub(GUTTER_COLS))
+            .unwrap_or(DEFAULT_BAR_WIDTH),
+    };
+    measured.clamp(MIN_BAR_WIDTH, MAX_BAR_WIDTH)
+}
+
+fn render_divider(index: usize, total: usize, bar_width: usize) -> String {
+    let bar: String = std::iter::repeat(BAR_CHAR).take(bar_width).collect();
     let counter = format!("[{} of {}]", index + 1, total);
-    let padding = BAR_WIDTH.saturating_sub(counter.len());
+    let padding = bar_width.saturating_sub(counter.len());
     let spaces: String = std::iter::repeat(' ').take(padding).collect();
     format!("`{bar}`\n`{spaces}{counter}`")
 }
@@ -68,8 +127,9 @@ fn render_scaffold(
     note: &str,
     index: usize,
     total: usize,
+    bar_width: usize,
 ) -> String {
-    let divider = render_divider(index, total);
+    let divider = render_divider(index, total, bar_width);
     let badge = marker_badge(priority);
     let header = format!("{badge} **#{} {}**", case.number, case.name);
 
@@ -96,7 +156,9 @@ fn render_orientation(counts: &[(MarkerPriority, usize)], total: usize) -> Strin
 ///
 /// `exclude` is a set of case numbers to skip — typically cases already walked
 /// earlier in the session. Empty slice means include all marked cases.
-pub fn run(file: &Path, exclude: &[u32]) -> Result<()> {
+///
+/// `width` overrides the measured divider width; `None` measures the tmux pane.
+pub fn run(file: &Path, exclude: &[u32], width: Option<usize>) -> Result<()> {
     let input = std::fs::read_to_string(file)
         .with_context(|| format!("failed to read {}", file.display()))?;
 
@@ -145,11 +207,12 @@ pub fn run(file: &Path, exclude: &[u32]) -> Result<()> {
     );
 
     // Build walk items
+    let bar_width = resolve_bar_width(width);
     let walk_items: Vec<WalkItem> = items
         .iter()
         .enumerate()
         .map(|(i, (priority, note, case))| {
-            let scaffold = render_scaffold(case, *priority, note, i, total);
+            let scaffold = render_scaffold(case, *priority, note, i, total, bar_width);
             // Fields minus Decision column
             let fields: IndexMap<String, String> = case
                 .fields
@@ -197,4 +260,43 @@ pub fn run(file: &Path, exclude: &[u32]) -> Result<()> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn override_width_is_honored_within_range() {
+        assert_eq!(resolve_bar_width(Some(96)), 96);
+    }
+
+    #[test]
+    fn override_width_is_clamped_at_both_ends() {
+        assert_eq!(resolve_bar_width(Some(500)), MAX_BAR_WIDTH);
+        assert_eq!(resolve_bar_width(Some(1)), MIN_BAR_WIDTH);
+    }
+
+    #[test]
+    fn divider_right_aligns_counter_to_bar_width() {
+        let divider = render_divider(2, 9, 40);
+        let mut lines = divider.lines();
+
+        // Backtick-wrapped, so the rendered bar is the line minus two delimiters.
+        let bar = lines.next().unwrap();
+        assert_eq!(bar.chars().filter(|&c| c == BAR_CHAR).count(), 40);
+
+        let counter = lines.next().unwrap().trim_matches('`');
+        assert_eq!(counter.chars().count(), 40);
+        assert!(counter.ends_with("[3 of 9]"));
+    }
+
+    #[test]
+    fn narrow_bar_still_fits_its_counter() {
+        // The floor exists so padding never underflows to zero and shoves the
+        // counter left of the bar's end.
+        let divider = render_divider(9, 10, MIN_BAR_WIDTH);
+        let counter = divider.lines().nth(1).unwrap().trim_matches('`');
+        assert_eq!(counter.chars().count(), MIN_BAR_WIDTH);
+    }
 }
