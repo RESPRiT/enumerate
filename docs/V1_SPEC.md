@@ -188,7 +188,7 @@ The skill rewrite happens after the binary works end-to-end, so the bash flow ca
 ## Project layout
 
 ```
-/Users/harrison/dev/enumerate/
+/Users/harrison/tools/enumerate/
 ├── Cargo.toml
 ├── src/
 │   ├── main.rs          # entry, clap dispatch
