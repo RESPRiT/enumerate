@@ -17,20 +17,21 @@ The repo ships two pieces that work together:
   writes ./.enumerate/<YYYY-MM-DD>-<topic-slug>.md
         │
         ▼
-  Open the TUI — branches on whether Claude Code is
-  running inside tmux ($TMUX set):
+  Claude runs `enumerate <path> --popup`.
+  The binary detects tmux itself:
 
    Inside tmux                  Outside tmux
    ───────────                  ────────────
-   Claude runs                  Claude ends its turn
-   `enumerate <path> --popup`   and asks you to run
-   in the background.           `enumerate <path>`
-   TUI opens in a new tmux      yourself in another
-   window, overlaid on a        terminal. Reply when
-   dimmed snapshot of your      you're done so Claude
-   Claude Code pane. Claude     can re-read the file.
-   waits for the window to
-   close.
+   TUI opens in a new tmux      Binary prints a
+   window, overlaid on a        NOT_IN_TMUX handoff
+   dimmed snapshot of your      line and exits 0.
+   Claude Code pane. The        Claude ends its turn
+   Bash call backgrounds;       and asks you to run
+   Claude waits for the         `enumerate <path>`
+   window to close.             yourself in another
+                                terminal. Reply when
+                                you're done so Claude
+                                can re-read the file.
         │                              │
         └──────────────┬───────────────┘
                        ▼
@@ -97,10 +98,10 @@ Restart Claude Code (or start a new session) and `/enumerate` should be availabl
 /enumerate the auth middleware rewrite
 ```
 
-Claude explores the topic and writes `./.enumerate/2026-04-08-auth-middleware-rewrite.md` (date-prefixed for chronological sorting). What happens next depends on whether the Claude Code session itself is running inside tmux:
+Claude explores the topic and writes `./.enumerate/2026-04-08-auth-middleware-rewrite.md` (date-prefixed for chronological sorting). It then runs `enumerate <path> --popup` via the Bash tool unconditionally — Claude never inspects `$TMUX` itself. The binary decides what happens next based on whether the Claude Code session is inside tmux:
 
-- **Inside tmux (`$TMUX` is set in Claude Code's shell).** Claude runs `enumerate <path> --popup` itself via the Bash tool. The binary spawns a new tmux window and the TUI renders over a dimmed snapshot of your Claude Code pane. The Bash call backgrounds and Claude waits for the window-close notification before re-reading the file. This is the seamless in-session flow.
-- **Outside tmux (`$TMUX` unset).** `--popup` errors out non-zero outside tmux, so Claude does **not** invoke the binary. Instead it ends its turn and tells you to run `enumerate <path>` yourself in another terminal (full-screen TUI, no overlay). Reply in the chat when you've closed the editor — Claude re-reads the file and continues with the walk.
+- **Inside tmux.** The binary spawns a new tmux window and the TUI renders over a dimmed snapshot of your Claude Code pane. The Bash call backgrounds and Claude waits for the window-close notification before re-reading the file. This is the seamless in-session flow.
+- **Outside tmux.** The binary can't open a TUI from a non-interactive shell, so it prints a `NOT_IN_TMUX:` handoff line and exits 0 without opening anything. Claude sees that line, ends its turn, and tells you to run `enumerate <path>` yourself in another terminal (full-screen TUI, no overlay). Reply in the chat when you've closed the editor — Claude re-reads the file and continues with the walk.
 
 Either way, once the file is annotated, Claude walks you through your marked items one at a time.
 
@@ -111,10 +112,10 @@ You can also point the binary at any conformant doc:
 ```sh
 enumerate ./tests/fixtures/sample.md            # full-screen TUI in the current terminal
 enumerate ./tests/fixtures/sample.md --window   # spawn the TUI in a new tmux window (requires $TMUX)
-enumerate ./tests/fixtures/sample.md --popup    # same, with the current pane captured as a dimmed backdrop
+enumerate ./tests/fixtures/sample.md --popup    # same, with the current pane captured as a dimmed backdrop; outside tmux, prints a NOT_IN_TMUX handoff line and exits 0
 ```
 
-`--popup` is what the skill calls from inside tmux. It captures the current pane via `tmux capture-pane`, spawns a new window, and the TUI renders the snapshot dimmed behind a centered overlay. Both `--window` and `--popup` block until the user closes the window. Outside tmux they error out — the skill detects `$TMUX` itself and falls back to instructing the user to run plain `enumerate <path>` manually.
+`--popup` is what the skill calls, in every environment. Inside tmux it captures the current pane via `tmux capture-pane`, spawns a new window, and the TUI renders the snapshot dimmed behind a centered overlay; it blocks until the user closes the window. Outside tmux it prints `NOT_IN_TMUX: ... Ask the user to run: enumerate <path>` to stdout and exits 0 — the skill branches on that prefix and hands off to the user, so the agent never has to probe `$TMUX`. `--window` is the strict variant: it errors out non-zero outside tmux.
 
 ## Doc format
 

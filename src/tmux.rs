@@ -23,8 +23,19 @@ pub fn window(file: &Path) -> Result<()> {
 /// the TUI in a new window with `--backdrop-pane <id>`, so the TUI renders the
 /// snapshot dimmed behind a centered overlay. Same `new-window` + poll
 /// mechanism as [`window`]; differs only in the inner command.
+///
+/// Outside tmux this is a handoff, not an error: it prints a line prefixed
+/// `NOT_IN_TMUX:` to stdout and exits 0 without opening anything. The skill
+/// runs `--popup` unconditionally and branches on that prefix, so the agent
+/// never probes `$TMUX` itself. Keep the prefix in sync with `SKILL.md`.
 pub fn popup(file: &Path) -> Result<()> {
-    require_tmux()?;
+    if env::var_os("TMUX").is_none() {
+        println!(
+            "NOT_IN_TMUX: cannot open the TUI from this shell. Ask the user to run: enumerate {}",
+            shell_quote(&file.to_string_lossy())
+        );
+        return Ok(());
+    }
     let pane_id = env::var("TMUX_PANE")
         .context("$TMUX_PANE is not set; cannot capture source pane for --popup")?;
     let inner = build_inner_command(file, Some(&pane_id))?;
@@ -33,7 +44,7 @@ pub fn popup(file: &Path) -> Result<()> {
 
 fn require_tmux() -> Result<()> {
     if env::var_os("TMUX").is_none() {
-        bail!("not inside tmux: --window and --popup require an active tmux session");
+        bail!("not inside tmux: --window requires an active tmux session");
     }
     Ok(())
 }

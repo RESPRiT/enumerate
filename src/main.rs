@@ -18,7 +18,8 @@ struct Cli {
     #[arg(long, conflicts_with_all = ["popup", "backdrop_pane", "render"])]
     window: bool,
 
-    /// Spawn the TUI as a pseudo-modal over the current pane (requires $TMUX)
+    /// Spawn the TUI as a pseudo-modal over the current pane. Outside tmux,
+    /// prints a NOT_IN_TMUX handoff line and exits 0 instead of opening anything.
     #[arg(long, conflicts_with_all = ["window", "backdrop_pane", "render"])]
     popup: bool,
 
