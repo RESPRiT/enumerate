@@ -32,7 +32,9 @@ pub struct App {
     pub dirty: bool,
     /// Optional captured snapshot of another tmux pane to render as a dimmed
     /// backdrop behind the dialog. `None` for plain in-terminal / `--window`
-    /// modes; `Some` only when launched with `--backdrop-pane`.
+    /// modes and for Rex popups (whose floating layer shows the live pane
+    /// instead); `Some` only when launched with `--backdrop-pane` by a tmux
+    /// `--popup`.
     pub backdrop: Option<Text<'static>>,
     undo_stack: Vec<UndoEntry>,
     /// Cases whose progress has been "committed" by navigating away while

@@ -13,7 +13,11 @@ use ratatui::DefaultTerminal;
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 use ratatui::buffer::Buffer;
-use ratatui::crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
+use ratatui::crossterm::event::{
+    self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, KeyboardEnhancementFlags,
+    PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
+};
+use ratatui::crossterm::execute;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::Text;
 
@@ -48,7 +52,11 @@ pub fn run(file: &Path, backdrop_pane: Option<&str>) -> Result<()> {
     let prev_extended_keys = disable_tmux_extended_keys();
 
     let mut terminal = ratatui::init();
+    let kitty_keys = enable_rex_keyboard_protocol();
     let result = run_loop(&mut terminal, &mut app);
+    if kitty_keys {
+        let _ = execute!(std::io::stdout(), PopKeyboardEnhancementFlags);
+    }
     ratatui::restore();
 
     restore_tmux_extended_keys(prev_extended_keys);
@@ -379,6 +387,25 @@ fn debug_key(label: &str, key: &KeyEvent) {
     let _ = writeln!(f, "{label}: code={:?} mods={:?}", key.code, key.modifiers);
 }
 
+/// Under Rex, switch the terminal to the kitty keyboard protocol for the life
+/// of the TUI. In its legacy encoding Rex sends Shift+Enter and Ctrl+Enter as
+/// xterm modifyOtherKeys sequences (`CSI 27;2;13~`), which crossterm can't
+/// parse and silently drops; with `DISAMBIGUATE_ESCAPE_CODES` pushed they
+/// arrive as `CSI 13;2u`, which it can. Rex has no per-window switch like
+/// tmux's `extended-keys`, so this is the Rex counterpart of
+/// [`disable_tmux_extended_keys`]. Returns whether flags were pushed, so the
+/// caller knows to pop them.
+fn enable_rex_keyboard_protocol() -> bool {
+    if std::env::var("TERM_PROGRAM").as_deref() != Ok("rex") {
+        return false;
+    }
+    execute!(
+        std::io::stdout(),
+        PushKeyboardEnhancementFlags(KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES)
+    )
+    .is_ok()
+}
+
 /// Disable tmux extended-keys for the current window if running inside tmux.
 /// Returns the previous value so it can be restored on exit.
 ///
@@ -386,8 +413,14 @@ fn debug_key(label: &str, key: &KeyEvent) {
 /// `\x1b[32;2u` for Shift+Space). crossterm's legacy parser doesn't recognize
 /// these, silently dropping the events. Disabling extended-keys makes tmux send
 /// standard sequences that crossterm handles correctly.
+///
+/// Gated on the detected multiplexer rather than `$TMUX` alone: a Rex pane can
+/// carry a `$TMUX` leaked from the shell that started the Rex server, and a
+/// target-less `set-option` there would flip some unrelated tmux window.
 fn disable_tmux_extended_keys() -> Option<String> {
-    std::env::var_os("TMUX")?;
+    if !matches!(crate::mux::detect(), crate::mux::Mux::Tmux) {
+        return None;
+    }
     let prev = Command::new("tmux")
         .args(["show-option", "-wqv", "extended-keys"])
         .output()
@@ -408,4 +441,3 @@ fn restore_tmux_extended_keys(prev: Option<String>) {
         .args(["set-option", "-w", "extended-keys", &val])
         .output();
 }
-

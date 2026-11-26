@@ -6,15 +6,17 @@ use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
 
+use super::shell_quote;
+
 const POLL_INTERVAL: Duration = Duration::from_millis(100);
 
 /// Spawn the TUI in a new tmux window and block until that window closes.
 ///
-/// Requires `$TMUX` to be set; errors otherwise. Uses `tmux new-window` so the
+/// The caller ([`super::window`]) has already established that we're inside
+/// tmux. Uses `tmux new-window` so the
 /// TUI runs in a real window (auto-resizes with the terminal, prefix keys still
 /// work) instead of a modal `display-popup`.
 pub fn window(file: &Path) -> Result<()> {
-    require_tmux()?;
     let inner = build_inner_command(file, None)?;
     spawn_and_wait(&inner)
 }
@@ -22,53 +24,42 @@ pub fn window(file: &Path) -> Result<()> {
 /// Pseudo-modal: capture the current pane via `tmux capture-pane` and relaunch
 /// the TUI in a new window with `--backdrop-pane <id>`, so the TUI renders the
 /// snapshot dimmed behind a centered overlay. Same `new-window` + poll
-/// mechanism as [`window`]; differs only in the inner command.
-///
-/// Outside tmux this is a handoff, not an error: it prints a line prefixed
-/// `NOT_IN_TMUX:` to stdout and exits 0 without opening anything. The skill
-/// runs `--popup` unconditionally and branches on that prefix, so the agent
-/// never probes `$TMUX` itself. Keep the prefix in sync with `SKILL.md`.
+/// mechanism as [`window`]; differs only in the inner command. The caller
+/// ([`super::popup`]) has already established that we're inside tmux.
 pub fn popup(file: &Path) -> Result<()> {
-    if env::var_os("TMUX").is_none() {
-        println!(
-            "NOT_IN_TMUX: cannot open the TUI from this shell. Ask the user to run: enumerate {}",
-            shell_quote(&file.to_string_lossy())
-        );
-        return Ok(());
-    }
     let pane_id = env::var("TMUX_PANE")
         .context("$TMUX_PANE is not set; cannot capture source pane for --popup")?;
     let inner = build_inner_command(file, Some(&pane_id))?;
     spawn_and_wait(&inner)
 }
 
-fn require_tmux() -> Result<()> {
-    if env::var_os("TMUX").is_none() {
-        bail!("not inside tmux: --window requires an active tmux session");
+/// Width of the tmux pane this process was launched from, in columns.
+///
+/// `$TMUX_PANE` names the pane the caller occupies; without it tmux answers for
+/// the session's active pane, which is the same pane in the common case.
+/// Returns `None` if the reply doesn't parse as a number.
+pub fn pane_width() -> Option<usize> {
+    let mut cmd = Command::new("tmux");
+    cmd.arg("display-message").arg("-p");
+    if let Some(pane) = env::var_os("TMUX_PANE") {
+        cmd.arg("-t").arg(pane);
     }
-    Ok(())
+    cmd.arg("#{pane_width}");
+
+    let output = cmd.output().ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    std::str::from_utf8(&output.stdout).ok()?.trim().parse().ok()
 }
 
 fn build_inner_command(file: &Path, backdrop_pane: Option<&str>) -> Result<String> {
-    let current_exe = env::current_exe().context("could not determine current binary path")?;
-    let mut cmd = String::new();
     // Disable extended-keys before the TUI starts. tmux's extended-keys sends
     // CSI u sequences (e.g. \x1b[32;2u for Shift+Space) that crossterm's
     // legacy parser doesn't recognize, causing modified keys to silently vanish.
-    cmd.push_str("tmux set-option -w extended-keys off; ");
-    // Forward ENUMERATE_DEBUG so debug logging works through --popup/--window.
-    if let Some(val) = env::var_os("ENUMERATE_DEBUG") {
-        cmd.push_str("ENUMERATE_DEBUG=");
-        cmd.push_str(&shell_quote(&val.to_string_lossy()));
-        cmd.push(' ');
-    }
-    cmd.push_str(&shell_quote(&current_exe.to_string_lossy()));
-    cmd.push(' ');
-    cmd.push_str(&shell_quote(&file.to_string_lossy()));
-    if let Some(pane) = backdrop_pane {
-        cmd.push_str(" --backdrop-pane ");
-        cmd.push_str(&shell_quote(pane));
-    }
+    let mut cmd = String::from("tmux set-option -w extended-keys off; ");
+    let argv = super::tui_argv(file, backdrop_pane)?;
+    cmd.push_str(&argv.iter().map(|a| shell_quote(a)).collect::<Vec<_>>().join(" "));
     Ok(cmd)
 }
 
@@ -123,13 +114,5 @@ fn wait_for_window_close(window_id: &str) -> Result<()> {
             return Ok(());
         }
         sleep(POLL_INTERVAL);
-    }
-}
-
-fn shell_quote(s: &str) -> String {
-    if s.contains(['\'', ' ', '"', '\\', '$', '`']) {
-        format!("'{}'", s.replace('\'', "'\\''"))
-    } else {
-        s.to_string()
     }
 }

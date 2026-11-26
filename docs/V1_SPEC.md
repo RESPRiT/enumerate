@@ -1,5 +1,7 @@
 # enumerate-tui v1 spec
 
+> Historical v1 design (tmux-only). For current behavior — Rex and tmux backends, the `NO_MULTIPLEXER:` handoff — see the README.
+
 A TUI + tmux popup that replaces manual markdown editing for the
 `enumerate` skill. Claude writes a structured markdown file, then
 opens it in a popup over Claude Code for the user to annotate.

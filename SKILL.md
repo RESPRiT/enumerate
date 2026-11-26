@@ -34,10 +34,10 @@ Case shape and density are constrained by the **Enumeration discipline** section
 
 ### 3. Open the TUI
 
-Run `enumerate <path> --popup` via Bash. Do **not** check `$TMUX` or otherwise probe the environment first — the binary detects tmux itself, and the Bash result tells you which way it went. There are exactly two outcomes:
+Run `enumerate <path> --popup` via Bash. Do **not** check `$TMUX`, `$REX_BLOCK` or otherwise probe the environment first — the binary detects the multiplexer (tmux or Rex) itself, and the Bash result tells you which way it went. There are exactly two outcomes:
 
-- **The call backgrounds** (`Command running in background with ID: ...`): you're inside tmux and the TUI is open in a new window. **That is expected, not an error.** Do **not** read the doc file until you receive the explicit `<task-notification>` with `status: completed`. The TUI autosaves on every keystroke, so any read during the editing session sees an intermediate snapshot of the user's in-progress decisions, not their final state. Wait for the completion notification, then re-read the file and proceed to step 4. Do not pass a custom timeout to the Bash call — it backgrounds automatically and runs as long as the user needs.
-- **The call returns immediately with a line starting `NOT_IN_TMUX:`**: the binary can't open a TUI from this shell. End your turn and tell the user to run `enumerate <path>` themselves, then reply when they're done. Re-read the file in the next turn and proceed to step 4.
+- **The call backgrounds** (`Command running in background with ID: ...`): you're inside a multiplexer and the TUI is open (a floating layer over your pane in Rex, a new window in tmux). **That is expected, not an error.** Do **not** read the doc file until you receive the explicit `<task-notification>` with `status: completed`. The TUI autosaves on every keystroke, so any read during the editing session sees an intermediate snapshot of the user's in-progress decisions, not their final state. Wait for the completion notification, then re-read the file and proceed to step 4. Do not pass a custom timeout to the Bash call — it backgrounds automatically and runs as long as the user needs.
+- **The call returns immediately with a line starting `NO_MULTIPLEXER:`** (or `NOT_IN_TMUX:` from an older binary): the binary can't open a TUI from this shell. End your turn and tell the user to run `enumerate <path>` themselves, then reply when they're done. Re-read the file in the next turn and proceed to step 4.
 
 This step is **always** run after writing the doc. There is no condition under which it's skipped or replaced.
 

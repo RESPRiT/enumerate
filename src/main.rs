@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use anyhow::{Result, anyhow};
 use clap::{Parser, Subcommand};
-use enumerate::{tmux, tui, walk};
+use enumerate::{mux, tui, walk};
 
 #[derive(Parser)]
 #[command(name = "enumerate", about = "TUI for enumerate decision docs")]
@@ -14,12 +14,13 @@ struct Cli {
     #[arg(global = false)]
     file: Option<PathBuf>,
 
-    /// Spawn the TUI in a new tmux window (requires $TMUX)
+    /// Spawn the TUI in a new tmux or Rex window (requires a multiplexer)
     #[arg(long, conflicts_with_all = ["popup", "backdrop_pane", "render"])]
     window: bool,
 
-    /// Spawn the TUI as a pseudo-modal over the current pane. Outside tmux,
-    /// prints a NOT_IN_TMUX handoff line and exits 0 instead of opening anything.
+    /// Spawn the TUI as a modal over the current pane (a floating layer in Rex,
+    /// a new window over a dimmed snapshot in tmux). Outside a multiplexer,
+    /// prints a NO_MULTIPLEXER handoff line and exits 0 instead of opening anything.
     #[arg(long, conflicts_with_all = ["window", "backdrop_pane", "render"])]
     popup: bool,
 
@@ -34,8 +35,9 @@ struct Cli {
     cursor: usize,
 
     /// Internal: render the captured contents of <pane-id> as a dimmed
-    /// backdrop behind the TUI. Set automatically by --popup when relaunching
-    /// inside the new window; not intended for direct use.
+    /// backdrop behind the TUI. Set automatically by a tmux --popup when
+    /// relaunching inside the new window (Rex shows the live pane instead);
+    /// not intended for direct use.
     #[arg(long, value_name = "PANE_ID", hide = true)]
     backdrop_pane: Option<String>,
 }
@@ -61,7 +63,7 @@ enum Command {
         #[arg(long, value_delimiter = ',')]
         exclude: Vec<u32>,
 
-        /// Divider width in columns, overriding the measured tmux pane width.
+        /// Divider width in columns, overriding the measured pane width.
         /// Clamped to 20..=100. Defaults to the pane width less a 2-column
         /// gutter, or 60 when the pane can't be measured.
         #[arg(long, value_name = "COLS")]
@@ -79,9 +81,9 @@ fn main() -> Result<()> {
     let file = cli.file.expect("file argument required when not using a subcommand");
 
     if cli.window {
-        tmux::window(&file)
+        mux::window(&file)
     } else if cli.popup {
-        tmux::popup(&file)
+        mux::popup(&file)
     } else if let Some(size) = cli.render.as_deref() {
         let (w, h) = parse_wxh(size)?;
         tui::render_snapshot(&file, w, h, cli.cursor, &mut std::io::stdout())
