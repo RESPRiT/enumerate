@@ -10,6 +10,7 @@
 //! `env K=V` prefix.
 
 use std::env;
+use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 use std::sync::{Arc, Mutex};
@@ -27,10 +28,6 @@ const INSET: f64 = 0.05;
 /// Below this fraction of the window (in either dimension) the caller's pane is
 /// too small to host a usable overlay, so the layer centres on the window.
 const MIN_RECT_FRACTION: f64 = 0.4;
-
-/// Exit status `rex wait` uses when the target can't be found — the TUI block
-/// already closed before the wait started watching it.
-const REX_NOT_FOUND: i32 = 3;
 
 #[derive(Debug, Clone)]
 pub struct Rex {
@@ -52,13 +49,21 @@ impl Rex {
         Some(Rex { bin, block })
     }
 
-    /// `rex <args…>`, run to completion.
-    fn run(&self, args: &[&str]) -> Result<Output> {
+    /// `rex <args…>`, run to completion. `--autostart=false` keeps a stale
+    /// `$REX_BLOCK` (server since stopped) from launching a fresh local server
+    /// as a side effect of, say, `enumerate walk` measuring the pane.
+    fn run<I, S>(&self, args: I) -> Result<Output>
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<OsStr>,
+    {
+        let args: Vec<S> = args.into_iter().collect();
         Command::new(&self.bin)
-            .args(args)
+            .arg("--autostart=false")
+            .args(&args)
             .stdin(Stdio::null())
             .output()
-            .with_context(|| format!("failed to run `rex {}`", args.join(" ")))
+            .with_context(|| format!("failed to run `rex {}`", display_args(&args)))
     }
 
     /// Like [`run`](Self::run), but fails on a non-zero exit and parses stdout
@@ -76,6 +81,11 @@ impl Rex {
             .with_context(|| format!("`rex {}` returned invalid JSON", args.join(" ")))
     }
 
+    /// Call a session API method in the caller's session.
+    fn api(&self, method: &str, params: &Value) -> Result<Value> {
+        self.json(&["api", "call", "-s", &self.block, method, &params.to_string()])
+    }
+
     /// Open the TUI in a floating layer over the caller's pane and block until
     /// it exits. The live pane shows around the layer, so no captured backdrop
     /// is needed.
@@ -86,8 +96,28 @@ impl Rex {
         // The layer must target the caller's window explicitly: without
         // window_id Rex picks the session's *active* window, which needn't be
         // the one Claude is in.
-        let view = self.json(&["api", "call", "-s", &self.block, "session.view"])?;
+        let view = self.api("session.view", &json!({}))?;
         let bounds = layer_bounds(find_block_rect(&view, &self.block));
+
+        // Install the cleanup handler before the layer exists, so there's no
+        // window in which a signal leaves it orphaned. If this process is
+        // killed while waiting (the agent stops the backgrounded call), the
+        // layer goes down with it. The handler holds the lock across the close
+        // so the main thread, which locks the same mutex once the wait ends,
+        // can't exit underneath it.
+        let layer: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
+        {
+            let layer = Arc::clone(&layer);
+            let rex = self.clone();
+            let _ = ctrlc::set_handler(move || {
+                if let Ok(mut pending) = layer.lock()
+                    && let Some(id) = pending.take()
+                {
+                    rex.close_layer(&id);
+                }
+                std::process::exit(130);
+            });
+        }
 
         let params = json!({
             "window_id": window_id,
@@ -97,74 +127,56 @@ impl Rex {
                 "flavor": TERMINAL_FLAVOR,
                 "label": "enumerate",
                 "options": {
-                    "command": tui_command(file)?,
+                    "command": super::tui_argv(file, None)?,
                     "cwd": env::current_dir()?.to_string_lossy(),
                 },
             }},
         });
-        let created = self.json(&[
-            "api",
-            "call",
-            "-s",
-            &self.block,
-            "session.new_layer",
-            &params.to_string(),
-        ])?;
+        let created = self.api("session.new_layer", &params)?;
         let layer_id = str_field(&created, "layer_id")?.to_string();
+        if let Ok(mut pending) = layer.lock() {
+            *pending = Some(layer_id);
+        }
         let block_id = created["block_ids"][0]
             .as_str()
             .context("session.new_layer returned no block id")?
             .to_string();
 
-        // If this process is killed while waiting (the agent stops the
-        // backgrounded call), take the layer down with it instead of leaving
-        // an orphaned editor floating over the pane.
-        let guard = Arc::new(Mutex::new(Some((self.clone(), layer_id.clone()))));
-        {
-            let guard = Arc::clone(&guard);
-            let _ = ctrlc::set_handler(move || {
-                if let Some((rex, layer)) = guard.lock().ok().and_then(|mut g| g.take()) {
-                    rex.close_layer(&layer);
+        let waited = self.wait(&block_id);
+        // Blocks while the signal handler is mid-close; afterwards whatever
+        // is left is ours to clean up.
+        let pending = layer.lock().ok().and_then(|mut p| p.take());
+        let code = match waited {
+            Ok(code) => code,
+            Err(e) => {
+                if let Some(id) = pending {
+                    self.close_layer(&id);
                 }
-                std::process::exit(130);
-            });
-        }
-
-        let code = self.wait(&block_id)?;
-        let pending = guard.lock().ok().and_then(|mut g| g.take());
+                return Err(e);
+            }
+        };
         if code != 0 {
             // A TUI that fails within Rex's quick-exit window leaves its
             // terminal (and so the layer) open; grab what it printed, then
             // close it ourselves.
-            let screen = self
-                .run(&["capture", "-s", &self.block, "-b", &block_id, "--trim"])
-                .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
-                .unwrap_or_default();
-            if let Some((rex, layer)) = pending {
-                rex.close_layer(&layer);
+            let screen = self.capture(&block_id);
+            if let Some(id) = pending {
+                self.close_layer(&id);
             }
             bail!("enumerate TUI exited with status {code}:\n{screen}");
         }
         Ok(())
     }
 
-    /// Run the TUI in a new Rex window and block until it exits.
+    /// Run the TUI in a new Rex window and block until it exits. `rex run
+    /// --wait` exits with the TUI's own status.
     pub fn window(&self, file: &Path) -> Result<()> {
-        let cwd = env::current_dir()?;
-        let mut args = vec![
-            "run".to_string(),
-            "-s".to_string(),
-            self.block.clone(),
-            "--wait".to_string(),
-            "--json".to_string(),
-            "--label".to_string(),
-            "enumerate".to_string(),
-            "-c".to_string(),
-            cwd.to_string_lossy().into_owned(),
-            "--".to_string(),
-        ];
-        args.extend(tui_command(file)?);
-        let args: Vec<&str> = args.iter().map(String::as_str).collect();
+        let cwd = env::current_dir()?.to_string_lossy().into_owned();
+        let mut args = vec!["run", "-s", &self.block, "--wait", "--label", "enumerate", "-c", &cwd, "--"]
+            .into_iter()
+            .map(String::from)
+            .collect::<Vec<_>>();
+        args.extend(super::tui_argv(file, None)?);
         let out = self.run(&args)?;
         if !out.status.success() {
             bail!(
@@ -184,56 +196,46 @@ impl Rex {
         size["columns"].as_u64().map(|c| c as usize)
     }
 
-    /// Block until `block_id`'s program exits and return its exit status. A
-    /// block that's already gone counts as a clean exit: the TUI closed before
-    /// the wait could start watching.
+    /// Block until `block_id`'s program exits and return its exit status.
+    ///
+    /// `rex wait --json` prints `{"exit_code": N, …}` when the program exits.
+    /// When the block closes without reporting one — the user closed the
+    /// layer by hand, or it was already gone before the wait started watching
+    /// — there is no `exit_code` and `rex wait` itself exits non-zero. That is
+    /// the Rex counterpart of closing the tmux window, which counts as a clean
+    /// finish there too (the TUI autosaves every keystroke), so it's 0 here.
     fn wait(&self, block_id: &str) -> Result<i32> {
-        let out = self.run(&["wait", "-s", &self.block, block_id, "--json"])?;
+        let out = self.run(["wait", "-s", &self.block, block_id, "--json"])?;
         if let Ok(v) = serde_json::from_slice::<Value>(&out.stdout)
             && let Some(code) = v["exit_code"].as_i64()
         {
             return Ok(code as i32);
         }
         match out.status.code() {
-            Some(REX_NOT_FOUND) | Some(0) => Ok(0),
-            Some(code) => bail!(
-                "`rex wait` failed with status {code}: {}",
-                String::from_utf8_lossy(&out.stderr).trim()
-            ),
+            Some(_) => Ok(0),
             None => bail!("`rex wait` was killed by a signal"),
         }
+    }
+
+    /// The trimmed screen of `block_id`, or an empty string if it can't be read.
+    fn capture(&self, block_id: &str) -> String {
+        self.run(["capture", "-s", &self.block, "-b", block_id, "--trim"])
+            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+            .unwrap_or_default()
     }
 
     /// Best-effort: close a floating layer, ignoring a layer that's already
     /// gone.
     fn close_layer(&self, layer_id: &str) {
-        let params = json!({ "layer_id": layer_id }).to_string();
-        let _ = self.run(&[
-            "api",
-            "call",
-            "-s",
-            &self.block,
-            "session.close_layer",
-            &params,
-        ]);
+        let _ = self.api("session.close_layer", &json!({ "layer_id": layer_id }));
     }
 }
 
-/// `[env ENUMERATE_DEBUG=… ] <abs exe> <abs file>`.
-fn tui_command(file: &Path) -> Result<Vec<String>> {
-    let exe = env::current_exe().context("could not determine current binary path")?;
-    let file = file
-        .canonicalize()
-        .with_context(|| format!("failed to resolve {}", file.display()))?;
-    let mut cmd = Vec::new();
-    // Forward ENUMERATE_DEBUG so debug logging works through --popup/--window.
-    if let Some(val) = env::var_os("ENUMERATE_DEBUG") {
-        cmd.push("env".to_string());
-        cmd.push(format!("ENUMERATE_DEBUG={}", val.to_string_lossy()));
-    }
-    cmd.push(exe.to_string_lossy().into_owned());
-    cmd.push(file.to_string_lossy().into_owned());
-    Ok(cmd)
+fn display_args<S: AsRef<OsStr>>(args: &[S]) -> String {
+    args.iter()
+        .map(|a| a.as_ref().to_string_lossy())
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 fn str_field<'a>(v: &'a Value, key: &str) -> Result<&'a str> {

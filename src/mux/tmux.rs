@@ -12,11 +12,11 @@ const POLL_INTERVAL: Duration = Duration::from_millis(100);
 
 /// Spawn the TUI in a new tmux window and block until that window closes.
 ///
-/// Requires `$TMUX` to be set; errors otherwise. Uses `tmux new-window` so the
+/// The caller ([`super::window`]) has already established that we're inside
+/// tmux. Uses `tmux new-window` so the
 /// TUI runs in a real window (auto-resizes with the terminal, prefix keys still
 /// work) instead of a modal `display-popup`.
 pub fn window(file: &Path) -> Result<()> {
-    require_tmux()?;
     let inner = build_inner_command(file, None)?;
     spawn_and_wait(&inner)
 }
@@ -53,33 +53,13 @@ pub fn pane_width() -> Option<usize> {
     std::str::from_utf8(&output.stdout).ok()?.trim().parse().ok()
 }
 
-fn require_tmux() -> Result<()> {
-    if env::var_os("TMUX").is_none() {
-        bail!("not inside tmux: --window requires an active tmux session");
-    }
-    Ok(())
-}
-
 fn build_inner_command(file: &Path, backdrop_pane: Option<&str>) -> Result<String> {
-    let current_exe = env::current_exe().context("could not determine current binary path")?;
-    let mut cmd = String::new();
     // Disable extended-keys before the TUI starts. tmux's extended-keys sends
     // CSI u sequences (e.g. \x1b[32;2u for Shift+Space) that crossterm's
     // legacy parser doesn't recognize, causing modified keys to silently vanish.
-    cmd.push_str("tmux set-option -w extended-keys off; ");
-    // Forward ENUMERATE_DEBUG so debug logging works through --popup/--window.
-    if let Some(val) = env::var_os("ENUMERATE_DEBUG") {
-        cmd.push_str("ENUMERATE_DEBUG=");
-        cmd.push_str(&shell_quote(&val.to_string_lossy()));
-        cmd.push(' ');
-    }
-    cmd.push_str(&shell_quote(&current_exe.to_string_lossy()));
-    cmd.push(' ');
-    cmd.push_str(&shell_quote(&file.to_string_lossy()));
-    if let Some(pane) = backdrop_pane {
-        cmd.push_str(" --backdrop-pane ");
-        cmd.push_str(&shell_quote(pane));
-    }
+    let mut cmd = String::from("tmux set-option -w extended-keys off; ");
+    let argv = super::tui_argv(file, backdrop_pane)?;
+    cmd.push_str(&argv.iter().map(|a| shell_quote(a)).collect::<Vec<_>>().join(" "));
     Ok(cmd)
 }
 

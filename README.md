@@ -100,7 +100,7 @@ Restart Claude Code (or start a new session) and `/enumerate` should be availabl
 
 Claude explores the topic and writes `./.enumerate/2026-04-08-auth-middleware-rewrite.md` (date-prefixed for chronological sorting). It then runs `enumerate <path> --popup` via the Bash tool unconditionally — Claude never inspects the environment itself. The binary decides what happens next based on which multiplexer the Claude Code session is in:
 
-- **Inside Rex.** The binary opens a floating layer over your Claude Code pane (inset within it, so the live pane frames the editor) and runs the TUI there. The Bash call blocks until you close the TUI, then the layer disappears and focus returns to Claude.
+- **Inside Rex.** The binary opens a floating layer over your Claude Code pane (inset within it, so the live pane frames the editor) and runs the TUI there. The Bash call backgrounds and Claude waits for the TUI to close; then the layer disappears and focus returns to Claude.
 - **Inside tmux.** The binary spawns a new tmux window and the TUI renders over a dimmed snapshot of your Claude Code pane. The Bash call backgrounds and Claude waits for the window-close notification before re-reading the file. This is the seamless in-session flow.
 - **Outside both.** The binary can't open a TUI from a non-interactive shell, so it prints a `NO_MULTIPLEXER:` handoff line and exits 0 without opening anything. Claude sees that line, ends its turn, and tells you to run `enumerate <path>` yourself in another terminal (full-screen TUI, no overlay). Reply in the chat when you've closed the editor — Claude re-reads the file and continues with the walk.
 
@@ -116,9 +116,9 @@ enumerate ./tests/fixtures/sample.md --window   # spawn the TUI in a new Rex or 
 enumerate ./tests/fixtures/sample.md --popup    # open the TUI as a modal over the current pane; outside a multiplexer, prints a NO_MULTIPLEXER handoff line and exits 0
 ```
 
-`--popup` is what the skill calls, in every environment. Detection picks the innermost multiplexer: Rex when `$TERM_PROGRAM` is `rex` and `$REX_BLOCK` is set, otherwise tmux when `$TMUX` is set, so tmux running inside a Rex pane (or the reverse) resolves correctly.
+`--popup` is what the skill calls, in every environment. Detection picks the innermost multiplexer: Rex when `$TERM_PROGRAM` is `rex`, `$REX_BLOCK` is set and the `rex` binary is on PATH (or in `$REX_BIN_DIR`); otherwise tmux when `$TERM_PROGRAM` isn't `rex`, `$TMUX` is set and `tmux` is on PATH. Because each multiplexer sets `$TERM_PROGRAM` in its own panes, tmux nested in a Rex pane (or the reverse) picks the inner one even though the outer one's variables leak through.
 
-- **Rex:** creates a floating layer over the caller's pane (`session.new_layer`) running the TUI and blocks on `rex wait`. If the TUI fails at startup, its output is printed and the layer is closed; if the `--popup` process is killed, it closes the layer on the way out. Under Rex the TUI turns on the kitty keyboard protocol so Shift/Ctrl+Enter reach it.
+- **Rex:** creates a floating layer over the caller's pane (`session.new_layer`) running the TUI and blocks on `rex wait`. If the TUI fails at startup, its output is printed and the layer is closed; if the `--popup` process is killed, it closes the layer on the way out. Closing the layer by hand counts as finishing, like closing the tmux window. Under Rex the TUI turns on the kitty keyboard protocol so Shift/Ctrl+Enter reach it.
 - **tmux:** captures the current pane via `tmux capture-pane`, spawns a new window, and the TUI renders the snapshot dimmed behind a centered overlay; it blocks until the user closes the window.
 - **Neither:** prints `NO_MULTIPLEXER: ... Ask the user to run: enumerate <path>` to stdout and exits 0 — the skill branches on that prefix and hands off to the user, so the agent never has to probe the environment.
 

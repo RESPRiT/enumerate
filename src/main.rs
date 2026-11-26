@@ -35,8 +35,9 @@ struct Cli {
     cursor: usize,
 
     /// Internal: render the captured contents of <pane-id> as a dimmed
-    /// backdrop behind the TUI. Set automatically by --popup when relaunching
-    /// inside the new window; not intended for direct use.
+    /// backdrop behind the TUI. Set automatically by a tmux --popup when
+    /// relaunching inside the new window (Rex shows the live pane instead);
+    /// not intended for direct use.
     #[arg(long, value_name = "PANE_ID", hide = true)]
     backdrop_pane: Option<String>,
 }
