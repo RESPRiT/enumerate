@@ -29,9 +29,9 @@ cargo run -- ./tests/fixtures/sample.md   # run TUI on a sample doc
 cargo install --path .          # install to ~/.cargo/bin (needed for /enumerate)
 ```
 
-**Testing:** parser and serializer have round-trip tests at `tests/fixtures/`. The TUI and tmux launcher have no automated tests — exercise UI changes manually with `cargo run -- <file>`, and for popup-specific changes `cargo run -- <file> --popup` inside tmux.
+**Testing:** parser and serializer have round-trip tests at `tests/fixtures/`. The TUI and multiplexer launchers have no automated tests (beyond the Rex layout helpers in `src/mux/rex.rs`) — exercise UI changes manually with `cargo run -- <file>`, and for popup-specific changes `cargo run -- <file> --popup` inside Rex and tmux — the two backends are separate code paths.
 
-**Testing with the user in-session:** after `cargo install --path .`, launch the updated TUI in-session via `enumerate <file> --popup` so the user can interact with it directly in the tmux popup — no need to drop to a separate terminal. Background the Bash call and wait for the completion notification before reading the file.
+**Testing with the user in-session:** after `cargo install --path .`, launch the updated TUI in-session via `enumerate <file> --popup` so the user can interact with it directly in the popup — no need to drop to a separate terminal. Background the Bash call and wait for the completion notification before reading the file.
 
 ## Cross-cutting
 

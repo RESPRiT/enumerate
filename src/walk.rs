@@ -53,9 +53,10 @@ fn marker_tally_badge(priority: MarkerPriority) -> &'static str {
 
 const BAR_CHAR: char = '━';
 
-/// Divider width used when the pane can't be measured — no tmux, or tmux
-/// declined to answer. Matches the width the walk shipped with before the
-/// divider became pane-relative, so an unmeasured run looks unremarkable.
+/// Divider width used when the pane can't be measured — no multiplexer, or
+/// the multiplexer declined to answer. Matches the width the walk shipped with
+/// before the divider became pane-relative, so an unmeasured run looks
+/// unremarkable.
 const DEFAULT_BAR_WIDTH: usize = 60;
 
 /// Floor and ceiling on the divider width. The floor keeps a very narrow pane
@@ -69,36 +70,6 @@ const MAX_BAR_WIDTH: usize = 100;
 /// from the pane width so the bar ends inside the window rather than wrapping.
 const GUTTER_COLS: usize = 2;
 
-/// Width of the tmux pane this process was launched from, in columns.
-///
-/// `enumerate walk` runs as a child of the agent, whose stdout is a pipe rather
-/// than a terminal — so there is no window size to read from the fd, and
-/// `$COLUMNS` arrives as 0. tmux is the only source that knows the real size.
-/// `$TMUX_PANE` names the pane the caller occupies; without it tmux answers for
-/// the session's active pane, which is the same pane in the common case.
-///
-/// Returns `None` whenever the measurement isn't trustworthy — outside tmux, if
-/// the binary is missing, or if the reply doesn't parse as a number — leaving
-/// the caller to fall back rather than act on a guess.
-fn tmux_pane_width() -> Option<usize> {
-    if std::env::var_os("TMUX").is_none() {
-        return None;
-    }
-
-    let mut cmd = std::process::Command::new("tmux");
-    cmd.arg("display-message").arg("-p");
-    if let Some(pane) = std::env::var_os("TMUX_PANE") {
-        cmd.arg("-t").arg(pane);
-    }
-    cmd.arg("#{pane_width}");
-
-    let output = cmd.output().ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    std::str::from_utf8(&output.stdout).ok()?.trim().parse().ok()
-}
-
 /// Resolve the divider width from an explicit override or a pane measurement.
 ///
 /// `override_width` is the `--width` escape hatch: it replaces the measurement,
@@ -106,7 +77,7 @@ fn tmux_pane_width() -> Option<usize> {
 fn resolve_bar_width(override_width: Option<usize>) -> usize {
     let measured = match override_width {
         Some(width) => width,
-        None => tmux_pane_width()
+        None => crate::mux::pane_width()
             .map(|cols| cols.saturating_sub(GUTTER_COLS))
             .unwrap_or(DEFAULT_BAR_WIDTH),
     };
@@ -157,7 +128,7 @@ fn render_orientation(counts: &[(MarkerPriority, usize)], total: usize) -> Strin
 /// `exclude` is a set of case numbers to skip — typically cases already walked
 /// earlier in the session. Empty slice means include all marked cases.
 ///
-/// `width` overrides the measured divider width; `None` measures the tmux pane.
+/// `width` overrides the measured divider width; `None` measures the multiplexer pane.
 pub fn run(file: &Path, exclude: &[u32], width: Option<usize>) -> Result<()> {
     let input = std::fs::read_to_string(file)
         .with_context(|| format!("failed to read {}", file.display()))?;
